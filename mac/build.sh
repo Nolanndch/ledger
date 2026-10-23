@@ -12,7 +12,9 @@ BUNDLE_ID=${BUNDLE_ID:-io.github.nolanndch.ledger}
 REPO_URL=${REPO_URL:-https://github.com/Nolanndch/ledger}
 ARCH=${ARCH:-$(uname -m)}
 [ "$ARCH" = "x86_64" ] && ARCH=x64
-case "$ARCH" in arm64) TARGET=arm64-apple-macos12 ;; x64) TARGET=x86_64-apple-macos12 ;; *) echo "ARCH inconnue : $ARCH"; exit 1 ;; esac
+# Intel : macOS 13 minimum, la chaîne d'outils récente n'a plus les bibliothèques de compatibilité x86_64 pour macOS 12.
+case "$ARCH" in arm64) MIN_OS=12.0 ;; x64) MIN_OS=13.0 ;; *) echo "ARCH inconnue : $ARCH"; exit 1 ;; esac
+TARGET="$([ "$ARCH" = x64 ] && echo x86_64 || echo arm64)-apple-macos$MIN_OS"
 
 BUILD=build
 OUT="dist/$ARCH"
@@ -49,7 +51,7 @@ echo "→ Assemblage"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/app" "$APP/Contents/Resources/runtime"
 cp "$BUILD/Ledger-$ARCH" "$APP/Contents/MacOS/Ledger"
-sed -e "s|__VERSION__|$VERSION|g" -e "s|__BUNDLE_ID__|$BUNDLE_ID|g" -e "s|__REPO_URL__|$REPO_URL|g" mac/Info.plist > "$APP/Contents/Info.plist"
+sed -e "s|__VERSION__|$VERSION|g" -e "s|__MIN_OS__|$MIN_OS|g" -e "s|__BUNDLE_ID__|$BUNDLE_ID|g" -e "s|__REPO_URL__|$REPO_URL|g" mac/Info.plist > "$APP/Contents/Info.plist"
 cp "$BUILD/Ledger.icns" "$APP/Contents/Resources/Ledger.icns"
 cp server.mjs package.json "$APP/Contents/Resources/app/"
 rsync -a --exclude .DS_Store public/ "$APP/Contents/Resources/app/public/"

@@ -39,7 +39,7 @@ Si macOS dit que l'app « est endommagée », c'est le même blocage. Retire-le 
 xattr -dr com.apple.quarantine /Applications/Ledger.app
 ```
 
-macOS 12 ou plus récent. Rien d'autre à installer : l'app embarque son propre moteur (Node.js).
+macOS 12 ou plus récent (macOS 13 pour la version Intel). Rien d'autre à installer : l'app embarque son propre moteur (Node.js).
 
 ## Où sont mes données
 
