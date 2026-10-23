@@ -2,7 +2,7 @@
 
 Un registre pour suivre l'argent de plusieurs petits business au même endroit : entrées, sorties, paiements en attente, abonnements, objectifs et placements.
 
-Ledger est une app Mac qui fonctionne entièrement en local. Les données sont enregistrées dans une base SQLite sur ton Mac. Il n'y a ni compte, ni cloud, ni pistage.
+Ledger est une app pour Mac et Windows qui fonctionne entièrement en local. Les données sont enregistrées dans une base SQLite sur ton ordinateur. Il n'y a ni compte, ni cloud, ni pistage.
 
 ![Tableau de bord de Ledger](docs/dashboard-dark.png)
 
@@ -29,6 +29,8 @@ Ledger est une app Mac qui fonctionne entièrement en local. Les données sont e
 
 ## Installer l'app
 
+### Mac
+
 1. Télécharge `Ledger-…-macOS-arm64.zip` (Mac Apple Silicon) ou `…-x64.zip` (Mac Intel) depuis la page [Releases](../../releases/latest).
 2. Dézippe et glisse **Ledger.app** dans **Applications**.
 3. Au premier lancement, macOS bloque l'app parce qu'elle n'est pas signée par un développeur Apple enregistré. Ouvre **Réglages Système → Confidentialité et sécurité**, puis clique sur **Ouvrir quand même** en bas de la page.
@@ -41,9 +43,28 @@ xattr -dr com.apple.quarantine /Applications/Ledger.app
 
 macOS 12 ou plus récent (macOS 13 pour la version Intel). Rien d'autre à installer : l'app embarque son propre moteur (Node.js).
 
+### Windows
+
+1. Télécharge `Ledger-…-Windows-x64.zip` depuis la page [Releases](../../releases/latest).
+2. Fais clic droit sur le zip, choisis **Extraire tout**, puis place le dossier `Ledger` où tu veux (par exemple dans Documents).
+3. Double-clique sur **Ledger.exe**. Si Windows affiche « Windows a protégé votre ordinateur », clique sur **Informations complémentaires** puis **Exécuter quand même**.
+4. Pour le retrouver facilement, fais clic droit sur `Ledger.exe` puis **Épingler au menu Démarrer**.
+
+Windows 10 ou 11. L'interface s'ouvre dans une fenêtre d'application Microsoft Edge (sans onglets ni barre d'adresse). Edge est déjà installé sur tous les Windows récents.
+
+### Téléphone
+
+Il n'y a pas encore de version téléphone. L'interface s'adapte aux petits écrans, mais le serveur tourne sur l'ordinateur et n'accepte que les connexions venant de celui-ci, donc un téléphone ne peut pas y accéder.
+
 ## Où sont mes données
 
-Tout est dans `~/Library/Application Support/Ledger/` :
+| Système | Dossier |
+| --- | --- |
+| Mac | `~/Library/Application Support/Ledger/` |
+| Windows | `%APPDATA%\Ledger\` |
+| Linux (depuis les sources) | `~/.local/share/ledger/` |
+
+Le dossier contient :
 
 | Fichier | Contenu |
 | --- | --- |
@@ -51,7 +72,7 @@ Tout est dans `~/Library/Application Support/Ledger/` :
 | `backups/` | les sauvegardes quotidiennes |
 | `logs/` | le journal du serveur local |
 
-Le menu **Fichier → Afficher le dossier des données** l'ouvre dans le Finder. Pour changer de Mac, copie ce dossier, ou exporte en JSON puis importe sur l'autre Mac. Supprimer l'app ne supprime pas les données.
+Sur Mac, le menu **Fichier → Afficher le dossier des données** l'ouvre dans le Finder. Le bouton de **Réglages → Base de données** fonctionne sur les deux systèmes. Pour changer d'ordinateur, y compris passer d'un Mac à un PC, exporte en JSON puis importe sur l'autre machine. Supprimer l'app ne supprime pas les données.
 
 ## Comment ça marche
 
@@ -65,7 +86,9 @@ Ledger.app
 
 Au lancement, l'app démarre `server.mjs` sur `127.0.0.1:4747`, accessible depuis ce Mac uniquement, puis affiche l'interface. Le serveur utilise le module `node:sqlite` intégré à Node, il n'a donc aucune dépendance npm. Il s'arrête quand tu quittes l'app.
 
-Tant que l'app est ouverte, l'interface est aussi disponible dans ton navigateur sur [http://localhost:4747](http://localhost:4747) (menu **Fichier → Ouvrir dans le navigateur**).
+Sous Windows, `Ledger.exe` est un petit lanceur écrit en Go. Il démarre le même serveur avec le Node.js officiel pour Windows, puis ouvre la fenêtre Edge. Le serveur s'arrête tout seul 5 minutes après la fermeture de la dernière fenêtre.
+
+Tant que l'app est ouverte, l'interface est aussi disponible dans ton navigateur sur [http://localhost:4747](http://localhost:4747). Le serveur refuse les requêtes envoyées par d'autres sites web, qui ne peuvent donc pas modifier tes données en visant ce port.
 
 ## Développer
 
@@ -91,6 +114,12 @@ ARCH=x64 npm run build:mac     # version Mac Intel
 
 Le script télécharge le binaire officiel de Node.js et vérifie sa somme de contrôle, dessine l'icône, compile l'app Swift et la signe en ad hoc.
 
+La version Windows se construit depuis un Mac ou Linux. Il faut Go (`brew install go`) :
+
+```bash
+npm run build:windows          # dist/windows/Ledger/ et le zip
+```
+
 Sans l'app, `./install.sh` installe Ledger comme service de fond accessible dans le navigateur, et `./uninstall.sh` le retire. N'utilise pas les deux en même temps.
 
 ## Structure
@@ -101,6 +130,8 @@ public/index.html     interface (HTML, CSS et JS sans framework)
 mac/LedgerApp.swift   app macOS
 mac/build.sh          construction de Ledger.app
 mac/make-icon.swift   icône
+windows/main.go       lanceur Windows (Go)
+windows/build.sh      construction de la version Windows
 demo/                 données fictives
 ```
 

@@ -10,3 +10,6 @@
 /dist/
 node_modules/
 .DS_Store
+
+# Ressources Windows générées au build
+/windows/rsrc_*.syso

@@ -1,5 +1,5 @@
 // Ledger — serveur local : sert l'interface et une base SQLite (node:sqlite, sans dépendance).
-// Usage : node server.mjs [--import fichier.json] [--port 4747] [--exit-with-parent]
+// Usage : node server.mjs [--import fichier.json] [--port 4747] [--exit-with-parent] [--exit-when-idle secondes]
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,7 +13,11 @@ const PUBLIC = path.join(ROOT, "public");
 const args = process.argv.slice(2);
 const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const PORT = Number(argVal("--port") || process.env.LEDGER_PORT || 4747);
-const DATA_DIR = process.env.LEDGER_DATA_DIR || path.join(os.homedir(), "Library", "Application Support", "Ledger");
+const DEFAULT_DATA_DIR = {
+  darwin: path.join(os.homedir(), "Library", "Application Support", "Ledger"),
+  win32: path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Ledger"),
+}[process.platform] || path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "ledger");
+const DATA_DIR = process.env.LEDGER_DATA_DIR || DEFAULT_DATA_DIR;
 const DB_PATH = path.join(DATA_DIR, "ledger.db");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const KEEP_BACKUPS = 30;
@@ -338,6 +342,7 @@ async function api(req, res, parts) {
     return send(res, 200, { ...exportState(), info: info() });
   }
   if (resource === "info" && method === "GET") return send(res, 200, info());
+  if (resource === "ping") return send(res, 200, { ok: true });
   if (resource === "export" && method === "GET") {
     const date = today();
     if (id === "csv") return send(res, 200, csvExport(), { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="ledger-${date}.csv"` });
@@ -350,7 +355,8 @@ async function api(req, res, parts) {
     if (method === "POST" && action === "restore") { restoreBackup(decodeURIComponent(id)); return send(res, 200, { ok: true }); }
   }
   if (resource === "reveal" && method === "POST") {
-    spawn("open", ["-R", DB_PATH], { detached: true, stdio: "ignore" }).unref();
+    const [cmd, cmdArgs] = { darwin: ["open", ["-R", DB_PATH]], win32: ["explorer.exe", [`/select,${DB_PATH}`]] }[process.platform] || ["xdg-open", [DATA_DIR]];
+    spawn(cmd, cmdArgs, { detached: true, stdio: "ignore" }).unref();
     return send(res, 200, { ok: true });
   }
   if (resource === "prices" && id && method === "PUT") {
@@ -413,10 +419,23 @@ if (importFile) {
 dailyBackup();
 setInterval(() => { dailyBackup(); materializeRecurring(); }, 60 * 60 * 1000).unref();
 
+// L'API n'écoute que 127.0.0.1, mais une page web ouverte dans le navigateur peut quand même viser ce port.
+// On refuse les requêtes venant d'un autre site (CSRF) et les noms d'hôte inconnus (DNS rebinding).
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+function checkOrigin(req) {
+  if (!ALLOWED_HOSTS.has(req.headers.host)) throw new HttpError(403, "Hôte non autorisé.");
+  if (req.headers["sec-fetch-site"] === "cross-site") throw new HttpError(403, "Requête d'un autre site refusée.");
+  const origin = req.headers.origin;
+  if (req.method !== "GET" && origin && !ALLOWED_HOSTS.has(origin.replace(/^http:\/\//, ""))) throw new HttpError(403, "Requête d'un autre site refusée.");
+}
+
+let lastRequest = Date.now();
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, "http://localhost");
+  lastRequest = Date.now();
   try {
     if (pathname.startsWith("/api/")) {
+      checkOrigin(req);
       dailyBackup();
       return await api(req, res, pathname.slice(5).split("/").filter(Boolean));
     }
@@ -432,4 +451,10 @@ const close = () => { server.close(); db.close(); process.exit(0); };
 process.on("SIGINT", close);
 process.on("SIGTERM", close);
 // Lancé par l'app Mac : s'arrête si l'app disparaît sans avoir pu le fermer (crash, kill).
-if (args.includes("--exit-with-parent")) setInterval(() => { if (process.ppid === 1) close(); }, 2000).unref();
+if (args.includes("--exit-with-parent")) {
+  const parent = process.ppid;
+  setInterval(() => { try { process.kill(parent, 0); } catch { close(); } }, 2000).unref();
+}
+// Lancé par le lanceur Windows : s'arrête quand plus aucune fenêtre Ledger ne l'interroge (l'interface envoie un ping régulier).
+const idle = Number(argVal("--exit-when-idle"));
+if (idle > 0) setInterval(() => { if (Date.now() - lastRequest > idle * 1000) close(); }, 5000).unref();

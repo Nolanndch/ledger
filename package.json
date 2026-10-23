@@ -1,7 +1,7 @@
 {
   "name": "ledger",
   "version": "1.0.0",
-  "description": "Registre local pour suivre l'argent de plusieurs business. App Mac, base SQLite, zéro dépendance.",
+  "description": "Registre local pour suivre l'argent de plusieurs business. App Mac et Windows, base SQLite, zéro dépendance.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node server.mjs",
     "demo": "LEDGER_DATA_DIR=./build/demo-data node server.mjs --import demo/ledger-demo.json && LEDGER_DATA_DIR=./build/demo-data node server.mjs --port 4799",
-    "build:mac": "bash mac/build.sh"
+    "build:mac": "bash mac/build.sh",
+    "build:windows": "bash windows/build.sh"
   }
 }

@@ -575,7 +575,7 @@ dialog h3 { font: 700 18px var(--f-display); letter-spacing: -.01em; }
             <div class="panel-body" style="display:grid;gap:16px;">
               <dl class="facts" id="dbFacts"></dl>
               <div class="btn-row">
-                <button class="btn small" id="revealBtn">Afficher dans le Finder</button>
+                <button class="btn small" id="revealBtn">Afficher le fichier</button>
                 <button class="btn small" id="backupNowBtn">Sauvegarder maintenant</button>
               </div>
             </div>
@@ -799,6 +799,8 @@ function updateDbSub() {
   $("#dbSub").textContent = `${n} mouvement${n > 1 ? "s" : ""} · synchro ${relTime(ui.lastSync)}`;
 }
 setInterval(updateDbSub, 15000);
+// Signale au serveur qu'une fenêtre est ouverte (sous Windows, il s'arrête tout seul quand plus personne ne l'utilise)
+setInterval(() => fetch("/api/ping").catch(() => {}), 30000);
 
 // ================= toasts & confirmation =================
 function toast(msg, undo, isErr) {
@@ -1566,7 +1568,9 @@ $("#dbPill").addEventListener("click", () => go("settings"));
 $("#menuBtn").addEventListener("click", () => { $("#side").classList.add("open"); $("#scrim").classList.add("open"); });
 $("#scrim").addEventListener("click", closeSide);
 $("#retryBtn").addEventListener("click", refresh);
-$("#revealBtn").addEventListener("click", () => mutate("POST", "reveal", null, "Ouvert dans le Finder"));
+const IS_WIN = /Windows/.test(navigator.userAgent);
+$("#revealBtn").textContent = IS_WIN ? "Afficher dans l'Explorateur" : "Afficher dans le Finder";
+$("#revealBtn").addEventListener("click", () => mutate("POST", "reveal", null, IS_WIN ? "Ouvert dans l'Explorateur" : "Ouvert dans le Finder"));
 $("#backupNowBtn").addEventListener("click", () => mutate("POST", "backups", null, "Sauvegarde créée"));
 $("#importBtn").addEventListener("click", () => $("#importFile").click());
 $("#importFile").addEventListener("change", async (e) => {
