@@ -1,5 +1,58 @@
 // Vue Réglages : business, catégories, base de données, import/export
-import { $, $$, esc, relTime, fmtBytes, store, ICON, S, ui, mutate, toast, confirmBox, domainById, catById, activeDomains, registerView, render, setScope, onClick, onChange, applyTheme } from "../core.js";
+import { $, $$, esc, fmt, fmtExact, fmtDate, relTime, fmtBytes, store, ICON, S, ui, mutate, toast, confirmBox, formBox, domainById, catById, activeDomains, registerView, render, setScope, onClick, onChange, applyTheme, saveSettings, setDiscreet, display, PERIODS, VIEW_TITLES } from "../core.js";
+
+const root = $("#view-settings");
+root.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Affichage</h2><span class="hint">enregistré dans la base, sauf le thème et le mode discret qui sont propres à cet appareil</span></div>
+    <div class="settings-grid">
+      <div class="field"><span class="label">Thème</span><div class="seg" id="themeSeg"><button data-t="system">Système</button><button data-t="light">Clair</button><button data-t="dark">Sombre</button></div></div>
+      <div class="field"><span class="label">Densité des listes</span><div class="seg" id="densitySeg"><button data-density="comfortable">Confortable</button><button data-density="compact">Compacte</button></div></div>
+      <div class="field"><label for="setPeriod">Période à l'ouverture</label><select class="select" id="setPeriod">${PERIODS.filter(([k]) => k !== "custom").map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="setView">Vue à l'ouverture</label><select class="select" id="setView"><option value="last">La dernière consultée</option><option value="dashboard">Tableau de bord</option><option value="ledger">Grand livre</option><option value="analytics">Analyse</option><option value="subscriptions">Abonnements</option><option value="investments">Investissements</option><option value="objectives">Objectifs</option></select></div>
+      <label class="check"><span class="toggle"><input type="checkbox" id="setCents"><span></span></span><span>Afficher les centimes</span></label>
+      <label class="check"><span class="toggle"><input type="checkbox" id="setCompare"><span></span></span><span>Comparer à la période précédente</span></label>
+      <label class="check"><span class="toggle"><input type="checkbox" id="setDiscreet"><span></span></span><span>Mode discret : masquer les montants <span class="faint">(touche H ou icône œil)</span></span></label>
+    </div>
+  </div>
+  <div class="grid-2 even">
+    <div class="panel">
+      <div class="panel-head"><h2>Business</h2><span class="hint">un business archivé garde son historique</span></div>
+      <div id="domainEdit"></div>
+      <form class="add-row" id="addDomainForm"><input class="input" id="newDomain" placeholder="Nouveau business" autocomplete="off"><button class="btn">Ajouter</button></form>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Catégories</h2></div>
+      <div id="catEdit"></div>
+      <form class="add-row" id="addCatForm"><input class="input" id="newCat" placeholder="Nouvelle catégorie" autocomplete="off"><button class="btn">Ajouter</button></form>
+    </div>
+  </div>
+  <div class="grid-2 even">
+    <div class="panel">
+      <div class="panel-head"><h2>Base de données</h2><span class="chip paid">SQLite locale</span></div>
+      <div class="panel-body" style="display:grid;gap:16px;">
+        <dl class="facts" id="dbFacts"></dl>
+        <div class="btn-row"><button class="btn small" id="revealBtn">Afficher le fichier</button><button class="btn small" id="backupNowBtn">Sauvegarder maintenant</button></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Import et export</h2></div>
+      <div class="panel-body" style="display:grid;gap:14px;">
+        <p class="muted" style="margin:0;font-size:13px;">L'export JSON contient tout (mouvements, abonnements, placements, réglages). Un export de Ledger 1.0 s'importe aussi. Importer remplace toutes les données, après une sauvegarde automatique.</p>
+        <div class="btn-row">
+          <a class="btn small" href="/api/export" download>Exporter JSON</a>
+          <a class="btn small" href="/api/export/csv" download>Mouvements (CSV)</a>
+          <a class="btn small" href="/api/export/csv-invest" download>Placements (CSV)</a>
+          <button class="btn small" id="importBtn">Importer un JSON…</button>
+          <input type="file" id="importFile" accept="application/json,.json" hidden>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>Sauvegardes</h2><span class="hint">une par jour, les 30 dernières sont gardées ; celles d'avant une mise à jour sont conservées</span></div>
+    <div class="rows" id="backupList"></div>
+  </div>`;
 
 export function renderSettings() {
   const doms = S.domains.slice().sort((a, b) => (b.active - a.active) || a.position - b.position);
@@ -8,6 +61,7 @@ export function renderSettings() {
     return `<div class="edit-row ${d.active ? "" : "archived"}">
       <input class="swatch" type="color" value="${esc(d.color)}" data-dom-color="${d.id}" aria-label="Couleur">
       <input class="input" value="${esc(d.name)}" data-dom-name="${d.id}" aria-label="Nom du business">
+      <button class="btn small opening" data-dom-opening="${d.id}" title="Solde de départ de la trésorerie">${d.openingBalance ? fmt(d.openingBalance) : "Solde de départ"}</button>
       <span class="faint num" style="font-size:12px;min-width:28px;text-align:right" title="mouvements">${n}</span>
       ${d.active ? `<button class="icon-btn" data-dom-move="${d.id}" data-dir="-1" aria-label="Monter" ${i === 0 ? "disabled" : ""}>${ICON.up}</button><button class="icon-btn" data-dom-move="${d.id}" data-dir="1" aria-label="Descendre">${ICON.down}</button>` : ""}
       <button class="icon-btn" data-dom-archive="${d.id}" title="${d.active ? "Archiver" : "Réactiver"}" aria-label="${d.active ? "Archiver" : "Réactiver"}">${d.active ? ICON.archive : ICON.restore}</button>
@@ -28,17 +82,41 @@ export function renderSettings() {
     $("#dbFacts").innerHTML = `
       <dt>Fichier</dt><dd class="num" style="font-size:12px">${esc(i.dbPath)}</dd>
       <dt>Taille</dt><dd>${fmtBytes(i.size)}</dd>
-      <dt>Contenu</dt><dd>${i.counts.transactions} mouvements · ${i.counts.domains} business · ${i.counts.categories} catégories · ${i.counts.recurring} récurrences · ${i.counts.objectives} objectifs</dd>
+      <dt>Contenu</dt><dd>${i.counts.transactions} mouvements · ${i.counts.recurring} abonnements · ${i.counts.accounts} comptes de placement · ${i.counts.operations} opérations · ${i.counts.domains} business · ${i.counts.objectives} objectifs</dd>
+      <dt>Version</dt><dd>Ledger ${esc(i.version)} · schéma ${i.schemaVersion}</dd>
       <dt>Dernière sauvegarde</dt><dd>${i.lastBackup ? relTime(i.lastBackup) : "jamais"}</dd>`;
     $("#backupList").innerHTML = i.backups.length ? i.backups.map((b) => {
-      const label = b.name.replace(/^ledger-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-?/, "").replace(/\.db$/, "").replace(/-/g, " ") || "auto";
+      const label = b.kept ? "avant mise à jour" : b.name.replace(/^ledger-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-?/, "").replace(/\.db$/, "").replace(/-/g, " ") || "auto";
       return `<div class="row"><div class="grow"><div class="title">${new Date(b.at).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })}</div><div class="sub num">${esc(b.name)} · ${fmtBytes(b.size)}</div></div>
         <span class="chip neutral">${esc(label)}</span><button class="btn small" data-restore="${esc(b.name)}">Restaurer</button></div>`;
     }).join("") : `<div class="empty">Aucune sauvegarde pour l'instant.</div>`;
   }
   const theme = store.get("theme", "system");
   $$("#themeSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme)));
+  const st = S.settings || {};
+  $$("#densitySeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.density === (st.density || "comfortable"))));
+  $("#setPeriod").value = st.defaultPeriod || "all";
+  $("#setView").value = st.startView || "dashboard";
+  $("#setCents").checked = st.showCents !== false;
+  $("#setCompare").checked = st.compare !== false;
+  $("#setDiscreet").checked = display.discreet;
 }
+
+onClick("density", (v) => saveSettings({ density: v }));
+$("#setPeriod").addEventListener("change", (e) => saveSettings({ defaultPeriod: e.target.value }, "Période à l'ouverture enregistrée"));
+$("#setView").addEventListener("change", (e) => saveSettings({ startView: e.target.value }, "Vue à l'ouverture enregistrée"));
+$("#setCents").addEventListener("change", (e) => saveSettings({ showCents: e.target.checked }));
+$("#setCompare").addEventListener("change", (e) => saveSettings({ compare: e.target.checked }));
+$("#setDiscreet").addEventListener("change", (e) => setDiscreet(e.target.checked));
+onClick("domOpening", async (id) => {
+  const d = domainById(id);
+  const v = await formBox(`Solde de départ · ${d.name}`, `
+    <p class="muted" style="margin:0;font-size:13px">L'argent que ce business avait déjà avant les mouvements saisis dans Ledger (solde du compte bancaire à une date). Il s'ajoute à la trésorerie ; les mouvements datés d'avant sont ignorés pour ne pas compter deux fois.</p>
+    <div class="fields-2"><div class="field"><label>Solde (€)</label><input class="input num" name="amount" type="number" step="0.01" value="${d.openingBalance || ""}" placeholder="0"></div>
+    <div class="field"><label>À la date du</label><input class="input" name="date" type="date" value="${d.openingDate || ""}"></div></div>
+    <p class="hint" style="margin:0">Sans date, le solde s'ajoute à tous les mouvements.</p>`, "Enregistrer");
+  if (v) await mutate("PUT", `domains/${id}`, { openingBalance: parseFloat(v.amount) || 0, openingDate: v.date || null }, "Solde de départ enregistré");
+});
 
 
 onClick("domMove", (id, el) => {

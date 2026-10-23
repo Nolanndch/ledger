@@ -21,7 +21,7 @@ const shift = (days) => { const d = new Date(); d.setDate(d.getDate() + days); r
 
 before(async () => {
   // Base 1.0 importée depuis le fichier de démo (contient des investissements « invest » à migrer)
-  const imp = spawn(process.execPath, [path.join(ROOT, "server.mjs"), "--import", path.join(ROOT, "demo/ledger-demo.json")], { env: { ...process.env, LEDGER_DATA_DIR: DIR } });
+  const imp = spawn(process.execPath, [path.join(ROOT, "server.mjs"), "--import", path.join(ROOT, "test/fixtures/ledger-v1.json")], { env: { ...process.env, LEDGER_DATA_DIR: DIR } });
   await new Promise((r) => imp.on("exit", r));
   proc = spawn(process.execPath, [path.join(ROOT, "server.mjs"), "--port", String(PORT)], { env: { ...process.env, LEDGER_DATA_DIR: DIR }, stdio: "pipe" });
   for (let i = 0; i < 50; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/ping`); return; } catch { await new Promise((r) => setTimeout(r, 100)); } }

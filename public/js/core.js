@@ -1,16 +1,29 @@
 // Socle partagé : état, API, formats, période, graphiques, navigation et registre des vues.
+import { addPeriod, addDays, daysBetween } from "./dates.js";
+import { replay, value as valuate } from "./lib/portfolio.js";
 // ================= utilitaires =================
 export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const eur0 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
-export const fmt = (n) => eur.format(n || 0).replace(/ /g, " ");
-export const fmtSigned = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n));
+// Affichage des montants : centimes (réglage partagé) et mode discret (propre à cet appareil).
+export const display = { cents: true, discreet: false };
+try { display.discreet = localStorage.getItem("ledger.ui.discreet") === "true"; } catch {}
+const MASK = "•••• €";
+const nb = (s) => s.replace(/\u202f/g, "\u00a0");
+export const fmtExact = (n) => nb(eur.format(n || 0));
+export const fmt = (n) => display.discreet ? MASK : nb((display.cents ? eur : eur0).format(n || 0));
+export const fmtSigned = (n) => display.discreet ? MASK : (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n));
+export const fmtCents = (c) => fmt((c || 0) / 100);
+export const fmtSignedCents = (c) => fmtSigned((c || 0) / 100);
+export const fmtQty = (q) => display.discreet ? "•••" : Number((q || 0).toPrecision(12)).toLocaleString("fr-FR", { maximumFractionDigits: 8 });
+export const fmtPct = (x, digits = 1) => x == null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(digits).replace(".", ",")} %`;
 export const fmtShort = (n) => {
+  if (display.discreet) return "•••";
   const a = Math.abs(n);
   if (a >= 1000) return (n < 0 ? "−" : "") + (a / 1000).toLocaleString("fr-FR", { maximumFractionDigits: a >= 10000 ? 0 : 1 }) + " k€";
-  return (n < 0 ? "−" : "") + eur0.format(a).replace(/ /g, " ");
+  return (n < 0 ? "−" : "") + nb(eur0.format(a));
 };
 export const pad = (n) => String(n).padStart(2, "0");
 export const localISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -41,16 +54,21 @@ export const ICON = {
   down: '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>',
   archive: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></svg>',
   restore: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  refund: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
 
 // ================= état =================
-export const S = { domains: [], categories: [], transactions: [], recurring: [], objectives: [], assetPrices: {}, info: null };
+export const S = { domains: [], categories: [], transactions: [], recurring: [], objectives: [], accounts: [], operations: [], assets: [], settings: {}, info: null };
 // Remplace le contenu de l'état sans changer l'objet (les modules gardent la même référence)
 export function replaceState(data) { for (const k of Object.keys(S)) delete S[k]; Object.assign(S, data); }
 export const ui = {
   view: store.get("view", "dashboard"),
   scope: store.get("scope", "all"),
   period: store.get("period", "all"),
+  custom: store.get("customPeriod", null),
   sort: { key: "date", dir: -1 },
   online: false,
   lastSync: null,
@@ -74,6 +92,7 @@ export async function refresh() {
   try {
     const data = await api("GET", "state");
     replaceState(data);
+    applySettings();
     ui.lastSync = new Date().toISOString();
     setDb("on");
     render();
@@ -82,6 +101,28 @@ export async function refresh() {
     if (!S.info) render();
   }
 }
+// Réglages d'affichage enregistrés dans la base
+export function applySettings() {
+  const st = S.settings || {};
+  display.cents = st.showCents !== false;
+  document.documentElement.classList.toggle("density-compact", st.density === "compact");
+}
+export async function saveSettings(patch, msg) {
+  S.settings = { ...S.settings, ...patch };
+  applySettings();
+  render();
+  try { S.settings = await api("PUT", "settings", patch); if (msg) toast(msg); }
+  catch (e) { toast(e.message, null, true); refresh(); }
+}
+export const widgetOn = (key, def = true) => S.settings?.dashboardWidgets?.[key] ?? def;
+export const columnOn = (key, def = true) => S.settings?.ledgerColumns?.[key] ?? def;
+export function setDiscreet(on) {
+  display.discreet = on;
+  try { localStorage.setItem("ledger.ui.discreet", String(on)); } catch {}
+  document.documentElement.classList.toggle("discreet", on);
+  render();
+}
+
 // Exécute une mutation puis recharge l'état depuis la base. Renvoie le résultat ou null si erreur (affichée).
 export async function mutate(method, url, body, okMsg, undo) {
   try {
@@ -141,17 +182,40 @@ export const catById = (id) => S.categories.find((c) => c.id === id);
 export const activeDomains = () => S.domains.filter((d) => d.active).sort((a, b) => a.position - b.position);
 export const signed = (t) => (t.type === "in" ? t.amount : -t.amount);
 
-export function periodStart() {
-  const now = new Date(), k = localISO(now).slice(0, 7);
-  switch (ui.period) {
-    case "month": return k + "-01";
-    case "3m": return addMonths(k, -2) + "-01";
-    case "12m": return addMonths(k, -11) + "-01";
-    case "year": return now.getFullYear() + "-01-01";
-    default: return null;
+// ---------- périodes ----------
+export const PERIODS = [
+  ["month", "Ce mois"], ["lastMonth", "Mois dernier"], ["3m", "3 derniers mois"], ["year", "Cette année"],
+  ["lastYear", "Année dernière"], ["12m", "12 derniers mois"], ["all", "Tout"], ["custom", "Personnalisée"],
+];
+const lastDay = (k) => { const [y, m] = k.split("-").map(Number); return `${k}-${pad(new Date(y, m, 0).getDate())}`; };
+// Bornes incluses de la période choisie. `start` vaut null pour « Tout ». La fin de « Tout » est aujourd'hui :
+// les échéances futures restent dans « À venir ».
+export function periodBounds(p = ui.period) {
+  const t = todayISO(), k = t.slice(0, 7), y = Number(t.slice(0, 4));
+  switch (p) {
+    case "month": return { start: k + "-01", end: lastDay(k) };
+    case "lastMonth": { const m = addMonths(k, -1); return { start: m + "-01", end: lastDay(m) }; }
+    case "3m": return { start: addMonths(k, -2) + "-01", end: lastDay(k) };
+    case "year": return { start: `${y}-01-01`, end: `${y}-12-31` };
+    case "lastYear": return { start: `${y - 1}-01-01`, end: `${y - 1}-12-31` };
+    case "12m": return { start: addMonths(k, -11) + "-01", end: lastDay(k) };
+    case "custom": {
+      const c = ui.custom || {};
+      if (c.from && c.to) return c.from <= c.to ? { start: c.from, end: c.to } : { start: c.to, end: c.from };
+      return { start: null, end: t };
+    }
+    default: return { start: null, end: t };
   }
 }
-export const PERIOD_LABEL = { month: "ce mois-ci", "3m": "sur 3 mois", year: "cette année", "12m": "sur 12 mois", all: "depuis le début" };
+export const periodStart = () => periodBounds().start;
+const shortDate = (s) => { const d = parseISO(s); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`; };
+export function periodLabel(p = ui.period) {
+  if (p === "custom") { const b = periodBounds(p); return b.start ? `du ${shortDate(b.start)} au ${shortDate(b.end)}` : "depuis le début"; }
+  return { month: "ce mois-ci", lastMonth: "le mois dernier", "3m": "sur 3 mois", year: "cette année", lastYear: "l'année dernière", "12m": "sur 12 mois", all: "depuis le début" }[p] || "";
+}
+export const PERIOD_LABEL = new Proxy({}, { get: (_, p) => periodLabel(p) });
+export const periodName = (p = ui.period) => (p === "custom" && periodBounds(p).start ? periodLabel(p).replace(/^du /, "Du ") : PERIODS.find(([k]) => k === p)?.[1] || "Tout");
+export const inPeriod = (date, b = periodBounds()) => (!b.start || date >= b.start) && date <= b.end;
 
 // Mouvements du business sélectionné (toutes périodes). Les business archivés restent visibles quand on les sélectionne.
 export function scopeTx() {
@@ -159,8 +223,8 @@ export function scopeTx() {
   return S.transactions.filter((t) => t.domainId === ui.scope);
 }
 export function periodTx(list = scopeTx()) {
-  const start = periodStart();
-  return start ? list.filter((t) => t.date >= start) : list;
+  const b = periodBounds();
+  return list.filter((t) => inPeriod(t.date, b));
 }
 export function sums(list) {
   const r = { in: 0, out: 0, net: 0, pIn: 0, pOut: 0, pNet: 0 };
@@ -171,20 +235,93 @@ export function sums(list) {
   r.net = r.in - r.out; r.pNet = r.pIn - r.pOut;
   return r;
 }
-// Mois couverts par la période (au moins 6, jusqu'au mois courant)
-export function monthRange() {
-  const cur = todayISO().slice(0, 7);
-  let first;
-  const start = periodStart();
-  if (start) first = monthKey(start);
-  else {
-    const dates = scopeTx().map((t) => t.date).sort();
-    first = dates.length ? monthKey(dates[0]) : cur;
+// Virements vers les placements : de l'argent déplacé, pas une dépense. Exclus des résultats.
+export const isTransfer = (t) => t.kind === "transfer";
+export const operating = (list) => list.filter((t) => t.kind !== "transfer");
+// Chiffre d'affaires et dépenses, nets des remboursements, hors virements.
+export function pnl(list) {
+  const r = { revenue: 0, expenses: 0, result: 0, pRevenue: 0, pExpenses: 0, transfers: 0, refunds: 0 };
+  for (const t of list) {
+    const paid = t.status === "paid", a = t.amount;
+    if (t.kind === "transfer") { if (paid) r.transfers += t.type === "out" ? a : -a; continue; }
+    if (t.kind === "refund") {
+      if (t.type === "out") { if (paid) { r.revenue -= a; r.refunds += a; } else r.pRevenue -= a; }
+      else if (paid) r.expenses -= a; else r.pExpenses -= a;
+      continue;
+    }
+    if (t.type === "in") { if (paid) r.revenue += a; else r.pRevenue += a; }
+    else if (paid) r.expenses += a; else r.pExpenses += a;
   }
-  const min = addMonths(cur, -5);
+  r.result = r.revenue - r.expenses;
+  return r;
+}
+// Trésorerie : soldes de départ + mouvements payés (virements compris) depuis la date de départ de chaque business.
+export function treasury(scope = ui.scope, upTo = todayISO()) {
+  const doms = scope === "all" ? S.domains : S.domains.filter((d) => d.id === scope);
+  const opening = new Map(doms.map((d) => [d.id, d.openingDate]));
+  let total = doms.reduce((a, d) => a + (d.openingDate && d.openingDate > upTo ? 0 : d.openingBalance || 0), 0);
+  for (const t of S.transactions) {
+    if (t.status !== "paid" || t.date > upTo) continue;
+    if (scope !== "all" && t.domainId !== scope) continue;
+    const od = opening.get(t.domainId);
+    if (od && t.date < od) continue;
+    total += signed(t);
+  }
+  return total;
+}
+export const hasOpeningBalance = (scope = ui.scope) => S.domains.some((d) => (scope === "all" || d.id === scope) && d.openingBalance);
+// Période précédente de même durée, pour comparer. Une période en cours est coupée à aujourd'hui des deux côtés.
+function shiftMonths(d, n) {
+  const [y, m, day] = d.split("-").map(Number);
+  const t = y * 12 + (m - 1) + n, ny = Math.floor(t / 12), nm = t % 12 + 1;
+  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${pad(nm)}-${pad(Math.min(day, last))}`;
+}
+export function comparisonBounds(p = ui.period) {
+  const b = periodBounds(p);
+  if (!b.start) return null;
+  const t = todayISO();
+  if (b.start > t) return null;
+  const cur = { start: b.start, end: b.end > t ? t : b.end };
+  const months = { month: 1, lastMonth: 1, "3m": 3, "12m": 12, year: 12, lastYear: 12 }[p];
+  let prev;
+  if (months) prev = { start: shiftMonths(cur.start, -months), end: shiftMonths(cur.end, -months) };
+  else { const len = daysBetween(cur.start, cur.end) + 1; prev = { start: addDays(cur.start, -len), end: addDays(cur.start, -1) }; }
+  return { cur, prev };
+}
+export const between = (list, b) => list.filter((t) => t.date >= b.start && t.date <= b.end);
+
+// ---------- placements ----------
+export const priceMap = () => Object.fromEntries(S.assets.filter((a) => a.price > 0).map((a) => [a.symbol, a.price]));
+export function accountResult(acc, prices = priceMap()) {
+  const r = replay(acc, S.operations.filter((o) => o.accountId === acc.id), { strict: false });
+  return { account: acc, r, v: valuate(r, prices) };
+}
+export function portfolio(accounts = S.accounts.filter((a) => !a.closedOn)) {
+  const prices = priceMap();
+  const list = accounts.map((a) => accountResult(a, prices));
+  const sum = (f) => list.reduce((x, a) => x + f(a), 0);
+  return {
+    accounts: list, value: sum((a) => a.v.total), contributions: sum((a) => a.r.contributions), gain: sum((a) => a.v.gain),
+    realized: sum((a) => a.r.realized), unrealized: sum((a) => a.v.unrealized), income: sum((a) => a.r.income), fees: sum((a) => a.r.fees + a.r.taxes),
+  };
+}
+
+// Mois couverts par la période, jusqu'au mois courant au plus tard (au moins 6 pour garder du contexte)
+export function monthRange(minMonths = 6) {
+  const cur = todayISO().slice(0, 7);
+  const b = periodBounds();
+  let last = monthKey(b.end) < cur ? monthKey(b.end) : cur;
+  let first;
+  if (b.start) first = monthKey(b.start);
+  else {
+    const dates = scopeTx().map((t) => t.date).filter((d) => d <= b.end).sort();
+    first = dates.length ? monthKey(dates[0]) : last;
+  }
+  const min = addMonths(last, -(minMonths - 1));
   if (first > min) first = min;
   const out = [];
-  for (let k = first; k <= cur; k = addMonths(k, 1)) out.push(k);
+  for (let k = first; k <= last; k = addMonths(k, 1)) out.push(k);
   return out;
 }
 
@@ -206,15 +343,16 @@ export function render() {
 export function renderNav() {
   $$("#nav .nav-item").forEach((b) => b.setAttribute("aria-current", String(b.dataset.view === ui.view)));
   $("#navCountTx").textContent = S.transactions.length || "";
-  const recActive = S.recurring.filter((r) => r.active).length;
-  $("#navCountRec").textContent = recActive || "";
+  const today = todayISO();
+  $("#navCountRec").textContent = S.recurring.filter((r) => !r.endDate || r.endDate > today).length || "";
+  $("#navCountInv").textContent = S.accounts.filter((a) => !a.closedOn).length || "";
   if (ui.scope !== "all" && !domainById(ui.scope)) ui.scope = "all";
   const doms = activeDomains();
   const scoped = ui.scope !== "all" ? domainById(ui.scope) : null;
   if (scoped && !scoped.active) doms.push(scoped);
-  const items = [`<button class="nav-item" data-scope="all" aria-current="${ui.scope === "all"}"><span class="dot" style="background:var(--ink-3)"></span><span class="grow">Tous les business</span><span class="count">${fmtShort(sums(S.transactions).net)}</span></button>`];
+  const items = [`<button class="nav-item" data-scope="all" aria-current="${ui.scope === "all"}"><span class="dot" style="background:var(--ink-3)"></span><span class="grow">Tous les business</span><span class="count">${fmtShort(treasury("all"))}</span></button>`];
   for (const d of doms) {
-    const net = sums(S.transactions.filter((t) => t.domainId === d.id)).net;
+    const net = treasury(d.id);
     items.push(`<button class="nav-item" data-scope="${d.id}" aria-current="${ui.scope === d.id}"><span class="dot" style="background:${esc(d.color)}"></span><span class="grow">${esc(d.name)}${d.active ? "" : " (archivé)"}</span><span class="count">${fmtShort(net)}</span></button>`);
   }
   $("#domainNav").innerHTML = items.join("");
@@ -229,8 +367,10 @@ export function renderTopbar() {
   $("#viewScope").innerHTML = usesScope
     ? (d ? `<span class="dot" style="background:${esc(d.color)}"></span>${esc(d.name)}` : "Tous les business") + (usesPeriod ? ` · ${PERIOD_LABEL[ui.period]}` : "")
     : "";
-  $("#periodSeg").hidden = !usesPeriod;
-  $$("#periodSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.p === ui.period)));
+  $("#discreetBtn")?.setAttribute("aria-pressed", String(display.discreet));
+  $("#periodPicker").hidden = !usesPeriod;
+  $("#periodBtnLabel").textContent = periodName();
+  $$("#periodPop [data-p]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.p === ui.period)));
 }
 
 
@@ -242,12 +382,28 @@ export function barRow(name, color, value, max, title = "", scopeId) {
     <div class="val ${value < 0 ? "down" : ""}">${fmtSigned(value)}</div></div>`;
 }
 
+export const isOverdue = (t) => t.status === "pending" && t.date < todayISO();
+export function txMeta(t) {
+  const d = domainById(t.domainId), c = catById(t.categoryId);
+  const bits = [fmtDate(t.date)];
+  if (t.counterparty) bits.push(esc(t.counterparty));
+  if (d) bits.push(esc(d.name));
+  if (c) bits.push(esc(c.name));
+  return bits.join(" · ");
+}
+export function natureBadge(t) {
+  if (t.kind === "transfer") return `<span class="badge" title="Virement vers un placement">${ICON.link}placement</span>`;
+  if (t.kind === "refund") return `<span class="badge">${ICON.refund}remboursement</span>`;
+  if (t.nature === "installment") return `<span class="badge" title="Paiement en plusieurs fois">${t.installmentIndex}/${t.installmentCount}</span>`;
+  if (t.recurringId) return `<span class="badge" title="Créé par un abonnement">${ICON.repeat}</span>`;
+  return "";
+}
 export function txRow(t, withPay) {
   const d = domainById(t.domainId);
-  const c = catById(t.categoryId);
+  const late = isOverdue(t);
   return `<div class="row">
     <span class="dot" style="background:${d ? esc(d.color) : "var(--ink-3)"}"></span>
-    <div class="grow"><div class="title">${esc(t.desc || "Sans libellé")}</div><div class="sub">${fmtDate(t.date)}${d ? " · " + esc(d.name) : ""}${c ? " · " + esc(c.name) : ""}</div></div>
+    <div class="grow"><div class="title">${esc(t.desc || "Sans libellé")} ${natureBadge(t)}${late ? ' <span class="chip down">En retard</span>' : ""}</div><div class="sub">${txMeta(t)}</div></div>
     <span class="amt ${t.type === "in" ? "up" : "down"}">${t.type === "in" ? "+" : "−"}${fmt(t.amount)}</span>
     ${withPay ? `<button class="btn small" data-pay="${t.id}">${t.type === "in" ? "Encaissé" : "Payé"}</button>` : `<button class="icon-btn" data-edit="${t.id}" aria-label="Modifier">${ICON.edit}</button>`}
   </div>`;
@@ -342,15 +498,26 @@ export function netChart(el, rows) {
 }
 
 
-export function fillSelects() {
+// Listes déroulantes déclarées avec data-fill="domains | domains-none | domains-perso | goal-domains | categories | category-filter | accounts"
+export function fillSelects(root = document) {
   const domOpts = activeDomains().map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
-  const catOpts = `<option value="">Sans catégorie</option>` + S.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-  for (const sel of ["#txDomain", "#recDomain"]) keepValue($(sel), `<option value="">Aucun</option>` + domOpts);
-  for (const sel of ["#txCategory", "#recCategory"]) keepValue($(sel), catOpts);
-  keepValue($("#goalDomain"), `<option value="all">Tous les business</option>` + domOpts);
-  keepValue($("#fCategory"), `<option value="all">Toutes catégories</option><option value="none">Sans catégorie</option>` + S.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join(""));
-  $("#descList").innerHTML = [...new Set(S.transactions.map((t) => t.desc).filter(Boolean))].slice(0, 200).map((d) => `<option value="${esc(d)}">`).join("");
-  $("#assetList").innerHTML = [...new Set(S.transactions.map((t) => t.asset).filter(Boolean))].map((a) => `<option value="${esc(a)}">`).join("");
+  const catOpts = S.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  const fills = {
+    "domains": () => domOpts,
+    "domains-none": () => `<option value="">Aucun business</option>` + domOpts,
+    "domains-perso": () => `<option value="">Perso (aucun business)</option>` + domOpts,
+    "goal-domains": () => `<option value="all">Tous les business</option>` + domOpts,
+    "categories": () => `<option value="">Sans catégorie</option>` + catOpts,
+    "category-filter": () => `<option value="all">Toutes catégories</option><option value="none">Sans catégorie</option>` + catOpts,
+    "accounts": () => S.accounts.filter((a) => !a.closedOn).map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join(""),
+  };
+  for (const sel of $$("select[data-fill]", root)) if (fills[sel.dataset.fill]) keepValue(sel, fills[sel.dataset.fill]());
+  const lists = {
+    descList: [...new Set(S.transactions.map((t) => t.desc).filter(Boolean))].slice(0, 300),
+    counterpartyList: [...new Set([...S.transactions, ...S.recurring].map((t) => t.counterparty).filter(Boolean))].slice(0, 300),
+    assetList: S.assets.map((a) => a.symbol),
+  };
+  for (const [id, values] of Object.entries(lists)) { const el = document.getElementById(id); if (el) el.innerHTML = values.map((v) => `<option value="${esc(v)}">`).join(""); }
 }
 export function keepValue(sel, html) { const v = sel.value; if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; } if ([...sel.options].some((o) => o.value === v)) sel.value = v; }
 
@@ -386,9 +553,42 @@ export function applyTheme() {
 
 // Fenêtres de dialogue : boutons de sélection, fermeture, clic sur le fond (aussi pour les dialogues créés plus tard)
 document.addEventListener("click", (e) => {
-  const seg = e.target.closest(".type-switch button");
+  const seg = e.target.closest(".type-switch button, .seg.pick button");
   if (seg && seg.parentElement.id) setSeg(seg.parentElement.id, seg.dataset.v);
   const close = e.target.closest("dialog [data-close]");
   if (close) close.closest("dialog").close();
   if (e.target.tagName === "DIALOG") e.target.close();
 });
+
+// Boîte de choix : renvoie la valeur du bouton cliqué, ou null si fermée.
+// choices : [{ value, label, primary?, danger? }]
+export function choiceBox(title, html, choices) {
+  const d = document.createElement("dialog");
+  d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3><div class="muted" style="font-size:13.5px">${html}</div>
+    <div class="dialog-actions">${choices.map((c) => `<button class="btn${c.primary ? " primary" : ""}${c.danger ? " danger" : ""}" value="${esc(c.value)}">${esc(c.label)}</button>`).join("")}</div></form>`;
+  document.body.appendChild(d);
+  d.showModal();
+  return new Promise((res) => d.addEventListener("close", () => { res(d.returnValue || null); d.remove(); }, { once: true }));
+}
+
+// Petit formulaire modal : renvoie les valeurs des champs (par name) ou null.
+export function formBox(title, fieldsHtml, okLabel = "Enregistrer", validate) {
+  const d = document.createElement("dialog");
+  d.innerHTML = `<form><h3>${esc(title)}</h3>${fieldsHtml}<div class="form-error" hidden></div>
+    <div class="dialog-actions"><button type="button" class="btn" data-close>Annuler</button><button class="btn primary">${esc(okLabel)}</button></div></form>`;
+  document.body.appendChild(d);
+  d.showModal();
+  d.querySelector("input, select, textarea")?.focus();
+  return new Promise((res) => {
+    let done = false;
+    d.querySelector("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const values = Object.fromEntries(new FormData(e.target).entries());
+      for (const el of d.querySelectorAll("input[type=checkbox][name]")) values[el.name] = el.checked;
+      const err = validate ? await validate(values) : null;
+      if (err) { const box = d.querySelector(".form-error"); box.textContent = err; box.hidden = false; return; }
+      done = true; d.close(); res(values);
+    });
+    d.addEventListener("close", () => { if (!done) res(null); d.remove(); }, { once: true });
+  });
+}

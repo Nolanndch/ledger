@@ -230,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   @objc func newTransaction() { webView.evaluateJavaScript("window.ledger && window.ledger.newTx()") }
   @objc func reload() { if let baseURL { webView.load(URLRequest(url: baseURL)) } }
   @objc func goSection(_ sender: NSMenuItem) {
-    let views = ["dashboard", "ledger", "analytics", "recurring", "objectives", "investments", "settings"]
+    let views = ["dashboard", "ledger", "analytics", "subscriptions", "objectives", "investments", "settings"]
     webView.evaluateJavaScript("window.ledger && window.ledger.go('\(views[sender.tag])')")
   }
   @objc func openDataFolder() { NSWorkspace.shared.open(dataDir) }
@@ -282,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       item("Coller", #selector(NSText.paste(_:)), "v"),
       item("Tout sélectionner", #selector(NSText.selectAll(_:)), "a"),
     ])
-    let sections = ["Tableau de bord", "Grand livre", "Analyse", "Récurrents", "Objectifs", "Investissements", "Réglages"]
+    let sections = ["Tableau de bord", "Grand livre", "Analyse", "Abonnements", "Objectifs", "Investissements", "Réglages"]
     var viewItems = sections.enumerated().map { i, title -> NSMenuItem in
       let m = item(title, #selector(goSection(_:)), String(i + 1), target: self); m.tag = i; return m
     }

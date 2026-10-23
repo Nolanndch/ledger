@@ -16,16 +16,43 @@ Ledger est une app pour Mac et Windows qui fonctionne entièrement en local. Les
 
 ## Ce que fait Ledger
 
-- **Tableau de bord** : solde encaissé, entrées, sorties, montants en attente, évolution du solde, résultat par business.
-- **Grand livre** : tous les mouvements regroupés par mois, avec le solde cumulé ligne par ligne, des filtres, une recherche et le tri par colonne. Un clic sur le statut le fait passer de « En attente » à « Payé ».
-- **Plusieurs business** : chaque mouvement est rattaché à un business. Tu peux tout voir ensemble ou un business à la fois, et archiver un business sans perdre son historique.
-- **Récurrents** : abonnements, loyers, clients mensuels. Le mouvement est créé automatiquement à chaque échéance.
-- **Objectifs** : progression basée sur ce qui est encaissé, montant à faire par mois pour tenir l'échéance.
-- **Analyse** : marge, CA moyen, meilleur mois, rentabilité par business, répartition par catégorie.
-- **Investissements** : positions, prix de revient moyen, plus-values latentes et réalisées.
-- **Sauvegardes** : une copie de la base chaque jour (les 30 dernières sont gardées), et une avant chaque import ou restauration. On restaure en un clic depuis Réglages.
-- **Export** JSON et CSV (le CSV s'ouvre directement dans Excel ou Numbers), **import** JSON.
-- Thème clair et sombre, raccourcis clavier (`N` pour un nouveau mouvement, `/` pour rechercher, `⌘1` à `⌘7` pour changer de section).
+### Trésorerie
+- **Tableau de bord** : trésorerie (avec un solde de départ par business), entrées, sorties, résultat et ce qui reste à encaisser, comparés à la période précédente. Encarts « À venir » (retards, échéances, prochains prélèvements), abonnements, placements et patrimoine. Tu choisis les encarts affichés.
+- **Paiements uniques, récurrents ou en plusieurs fois** : un mouvement peut être payé une fois, se répéter (chaque semaine, mois, trimestre, année…) ou être découpé en échéances, avec des dates et des montants modifiables (ex. acompte de 30 % puis solde). Les échéances futures restent « en attente » jusqu'à leur encaissement.
+- **Grand livre** : mouvements groupés par mois, solde de trésorerie ligne par ligne, mouvements futurs à part, filtres (nature, statut, retard, catégorie), recherche par libellé ou client, colonnes au choix.
+- **Remboursements** : un remboursement client réduit le chiffre d'affaires, un remboursement fournisseur réduit les dépenses.
+- **Plusieurs business**, clients et fournisseurs, catégories, archivage sans perte d'historique.
+
+### Abonnements
+- **Revenus récurrents (SaaS, contrats mensuels)** : revenu mensuel récurrent (MRR), revenu sur 12 mois (ARR), nombre d'abonnés, revenu moyen par client, courbe du MRR avec nouveaux abonnés, résiliations et changements de prix. Essais gratuits, fin après un nombre de paiements, résiliation et réactivation.
+- **Charges fixes** : coût mensuel et annuel de tes abonnements, prochains prélèvements, répartition par catégorie, montants variables (facturation à l'usage) à confirmer au paiement.
+- **Échéancier** : tout ce qui est attendu sur 12 mois.
+- Les paiements sont créés automatiquement à chaque échéance.
+
+### Investissements
+- **Comptes** : PEA, PEA-PME, compte-titres, crypto, autre. Un compte existant se reprend avec ses positions actuelles, sans ressaisir l'historique.
+- **Opérations** : achat, vente, versement, retrait, dividende (brut et retenues), intérêts, frais, impôt, division d'actions, et « trade clôturé » pour le CFD, les futures ou les options. Les versements et retraits sont reliés à la trésorerie d'un business, ou à « Perso ».
+- **Positions** au prix de revient unitaire (PRU, frais inclus), plus-values latentes et réalisées, par compte ou regroupées par actif, cours à mettre à jour en un écran.
+- **PEA** : ancienneté depuis le premier versement, date des 5 ans, plafond de versements (150 000 €, 20 000 € pour un PEA jeune, 225 000 € pour un PEA-PME) et avertissement avant un retrait anticipé.
+- **Trading** : résultat, part de trades gagnants, ratio gains/pertes, pire baisse, durée moyenne, résultat par mois et journal des trades.
+- Une vente qui dépasse la quantité détenue, ou un achat sans liquidités sur un PEA, est refusé.
+
+### Le reste
+- **Objectifs** sur le résultat, le chiffre d'affaires, le revenu récurrent ou la valeur des placements, avec le rythme mensuel à tenir.
+- **Analyse** : part des revenus récurrents, résultat par mois, rentabilité par business (placements compris), meilleurs clients, principaux fournisseurs, catégories.
+- **Affichage** : thème clair ou sombre, centimes, densité, période et vue à l'ouverture, comparaison avec la période précédente, et **mode discret** (touche `H`) qui masque tous les montants, par exemple pour partager ton écran.
+- **Sauvegardes** quotidiennes (les 30 dernières), plus une avant chaque import, restauration ou mise à jour, gardée à part. Restauration en un clic.
+- **Export** JSON complet, CSV des mouvements et des opérations de placement, **import** JSON (y compris les exports de Ledger 1.0).
+- Raccourcis : `N` nouveau mouvement, `/` rechercher, `H` mode discret, `⌘1` à `⌘7` pour changer de section.
+
+<details>
+<summary>Captures : investissements et abonnements</summary>
+
+![Investissements](docs/investments-dark.png)
+![Abonnements](docs/subscriptions-dark.png)
+</details>
+
+Tout est en euros : pour un actif coté en dollars, saisis les montants en euros de ton relevé.
 
 ## Installer l'app
 
@@ -96,6 +123,7 @@ Il faut Node.js 22.13 ou plus récent.
 
 ```bash
 npm start              # serveur sur http://localhost:4747 avec ta vraie base
+npm test               # tests (calculs et API sur une base temporaire)
 npm run demo           # serveur de démo sur http://localhost:4799 (données fictives, base séparée)
 ```
 
@@ -125,8 +153,12 @@ Sans l'app, `./install.sh` installe Ledger comme service de fond accessible dans
 ## Structure
 
 ```
-server.mjs            API REST + SQLite + sauvegardes + récurrences
-public/index.html     interface (HTML, CSS et JS sans framework)
+server.mjs            serveur HTTP et routes de l'API
+server/               base SQLite, migrations, trésorerie, abonnements, placements, import/export, sauvegardes
+public/               interface (HTML, CSS et modules JS sans framework)
+public/js/dates.js    calcul des échéances, partagé par le serveur et l'interface
+public/js/lib/        moteurs de calcul partagés : portefeuille (PRU, trades, PEA), abonnements (MRR, à venir)
+test/                 tests (node --test) : échéances, portefeuille, abonnements, API de bout en bout
 mac/LedgerApp.swift   app macOS
 mac/build.sh          construction de Ledger.app
 mac/make-icon.swift   icône
