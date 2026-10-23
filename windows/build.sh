@@ -38,6 +38,7 @@ rm -f windows/rsrc_windows_*.syso
 
 echo "→ Assemblage"
 cp server.mjs package.json "$OUT/app/"
+rsync -a server/ "$OUT/app/server/"
 rsync -a --exclude .DS_Store --exclude sw.js public/ "$OUT/app/public/"
 cp "$BUILD/node-win/node.exe" "$OUT/runtime/node.exe"
 cat > "$OUT/LISEZMOI.txt" <<EOF

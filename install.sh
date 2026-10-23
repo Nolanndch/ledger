@@ -20,6 +20,7 @@ NODE="$(command -v node || true)"
 mkdir -p "$APP" "$DATA/logs"
 rsync -a --delete "$SRC/public/" "$APP/public/"
 cp "$SRC/server.mjs" "$SRC/package.json" "$APP/"
+rsync -a --delete "$SRC/server/" "$APP/server/"
 
 if [ $# -ge 1 ] && [ ! -f "$DATA/ledger.db" ]; then
   "$NODE" "$APP/server.mjs" --import "$1"

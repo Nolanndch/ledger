@@ -54,6 +54,7 @@ cp "$BUILD/Ledger-$ARCH" "$APP/Contents/MacOS/Ledger"
 sed -e "s|__VERSION__|$VERSION|g" -e "s|__MIN_OS__|$MIN_OS|g" -e "s|__BUNDLE_ID__|$BUNDLE_ID|g" -e "s|__REPO_URL__|$REPO_URL|g" mac/Info.plist > "$APP/Contents/Info.plist"
 cp "$BUILD/Ledger.icns" "$APP/Contents/Resources/Ledger.icns"
 cp server.mjs package.json "$APP/Contents/Resources/app/"
+rsync -a server/ "$APP/Contents/Resources/app/server/"
 rsync -a --exclude .DS_Store public/ "$APP/Contents/Resources/app/public/"
 cp "$BUILD/node-$ARCH/node" "$APP/Contents/Resources/runtime/node"
 
