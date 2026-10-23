@@ -1,0 +1,12 @@
+# Données personnelles : ne jamais publier
+/ledger-*.json
+*.db
+*.db-wal
+*.db-shm
+/_ancien/
+
+# Build
+/build/
+/dist/
+node_modules/
+.DS_Store
