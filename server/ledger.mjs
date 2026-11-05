@@ -2,6 +2,7 @@
 // objectifs et réglages d'affichage.
 import { all, get, run, tx, insert, update, existsIn, need, HttpError, uid, cents, euros, today, isDate, nowStamp } from "./db.mjs";
 import { FREQS, firstOnOrAfter, occurrences } from "../public/js/dates.js";
+import { quiet, markAuto, wasDeleted } from "./sync.mjs";
 
 const str = (v, max = 500) => String(v ?? "").trim().slice(0, max);
 const optDate = (v, label) => { if (v == null || v === "") return null; need(isDate(v), `${label} invalide.`); return v; };
@@ -210,18 +211,21 @@ export function materializeRecurring() {
     for (const r of all("SELECT * FROM recurring WHERE active = 1 AND next_date <= ? AND (end_date IS NULL OR next_date < end_date)", t)) {
       const dates = occurrences({ start: r.next_date, freq: r.freq, interval: r.interval, anchorDay: r.anchor_day, end: r.end_date }, "0000-01-01", t);
       for (const date of dates) {
-        if (get("SELECT 1 FROM transactions WHERE recurring_id = ? AND date = ?", r.id, date)) continue;
-        insert("transactions", {
+        // Identifiant déterministe : chaque appareil synchronisé crée le même paiement, sans doublon.
+        const id = `${r.id}~${date}`;
+        if (get("SELECT 1 FROM transactions WHERE recurring_id = ? AND date = ?", r.id, date) || wasDeleted("transactions", id)) continue;
+        quiet(() => insert("transactions", {
           type: r.type, amount_cents: r.amount_cents, domain_id: r.domain_id, category_id: r.category_id,
           description: r.name, counterparty: r.counterparty, notes: "", date,
           status: r.amount_variable ? "pending" : r.status, kind: "cash", nature: r.kind === "subscription" ? "subscription" : "recurring",
           recurring_id: r.id, updated_at: nowStamp(),
-        });
+        }, id));
+        markAuto("transactions", id);
         created++;
       }
       const last = dates.at(-1) || r.next_date;
       const next = occurrences({ start: last, freq: r.freq, interval: r.interval, anchorDay: r.anchor_day }, last, "9999-12-31", 2)[1];
-      run("UPDATE recurring SET next_date = ? WHERE id = ?", next, r.id);
+      quiet(() => run("UPDATE recurring SET next_date = ? WHERE id = ?", next, r.id)); // recalculé à l'identique sur chaque appareil
     }
   });
   return created;

@@ -85,7 +85,7 @@
 
     <div class="content">
       <div class="banner" id="offlineBanner" hidden>
-        <span><b>Le serveur Ledger ne répond pas.</b> Tes données sont en sécurité dans la base locale. <span class="only-web">Relance-le avec <code>node server.mjs</code>.</span><span class="only-app">Quitte et relance l'application.</span></span>
+        <span><b>Le serveur Ledger ne répond pas.</b> Tes données sont en sécurité dans la base locale. <span class="only-web">Relance-le avec <code>node server.mjs</code>.</span><span class="only-android">Ouvre Termux et tape <code>ledger</code>.</span><span class="only-app">Quitte et relance l'application.</span></span>
         <button class="btn small" id="retryBtn">Réessayer</button>
       </div>
 
@@ -99,6 +99,15 @@
     </div>
   </main>
 </div>
+
+<!-- Navigation du bas (téléphone) -->
+<nav class="tabbar" id="tabbar" aria-label="Sections">
+  <button data-view="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Accueil</span></button>
+  <button data-view="ledger"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 10h16M4 15h16M4 20h10"/></svg><span>Livre</span></button>
+  <button data-view="subscriptions"><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg><span>Abos</span></button>
+  <button data-view="investments"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg><span>Placements</span></button>
+  <button id="tabMore"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg><span>Plus</span></button>
+</nav>
 
 <datalist id="descList"></datalist>
 <datalist id="counterpartyList"></datalist>

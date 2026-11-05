@@ -150,7 +150,15 @@ export function updateDbSub() {
 }
 setInterval(updateDbSub, 15000);
 // Signale au serveur qu'une fenêtre est ouverte (sous Windows, il s'arrête tout seul quand plus personne ne l'utilise)
-setInterval(() => fetch("/api/ping").catch(() => {}), 30000);
+// Le numéro de révision change quand une synchro a apporté des modifications faites sur l'autre appareil.
+let syncRev = null;
+setInterval(async () => {
+  try {
+    const { rev } = await (await fetch("/api/ping")).json();
+    if (syncRev !== null && rev !== syncRev && !document.querySelector("dialog[open]")) refresh();
+    syncRev = rev;
+  } catch { /* serveur arrêté : la bannière s'en charge */ }
+}, 30000);
 
 // ================= toasts & confirmation =================
 export function toast(msg, undo, isErr) {
@@ -341,7 +349,8 @@ export function render() {
 }
 
 export function renderNav() {
-  $$("#nav .nav-item").forEach((b) => b.setAttribute("aria-current", String(b.dataset.view === ui.view)));
+  $$("#nav .nav-item, #tabbar [data-view]").forEach((b) => b.setAttribute("aria-current", String(b.dataset.view === ui.view)));
+  $("#tabMore").setAttribute("aria-current", String(!$(`#tabbar [data-view="${ui.view}"]`)));
   $("#navCountTx").textContent = S.transactions.length || "";
   const today = todayISO();
   $("#navCountRec").textContent = S.recurring.filter((r) => !r.endDate || r.endDate > today).length || "";

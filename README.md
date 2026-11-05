@@ -79,9 +79,33 @@ macOS 12 ou plus récent (macOS 13 pour la version Intel). Rien d'autre à insta
 
 Windows 10 ou 11. L'interface s'ouvre dans une fenêtre d'application Microsoft Edge (sans onglets ni barre d'adresse). Edge est déjà installé sur tous les Windows récents.
 
-### Téléphone
+### Téléphone Android (synchronisé avec le Mac)
 
-Il n'y a pas encore de version téléphone. L'interface s'adapte aux petits écrans, mais le serveur tourne sur l'ordinateur et n'accepte que les connexions venant de celui-ci, donc un téléphone ne peut pas y accéder.
+Ledger tourne aussi sur le téléphone, avec sa propre base : il marche hors connexion, et le Mac et le téléphone s'échangent les changements **directement** dès qu'ils sont sur le même Wi-Fi. Aucun compte, aucun cloud, aucun serveur intermédiaire ; les échanges sont chiffrés avec un code de jumelage.
+
+**Sur le Mac**
+
+1. Réglages → **Synchronisation** → **Cet appareil est l'hôte (Mac)**. Un code de jumelage s'affiche.
+2. Le coupe-feu de macOS bloque les connexions entrantes vers Node. Autorise-le (à refaire après une mise à jour de Node) :
+   ```bash
+   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$(readlink -f "$(command -v node)")" --unblockapp "$(readlink -f "$(command -v node)")"
+   ```
+   Avec Ledger.app, la synchro ne fonctionne que tant que l'app est ouverte ; avec `./install.sh`, tant que le Mac est allumé.
+
+**Sur le téléphone**
+
+1. Installe **Termux** depuis [F-Droid](https://f-droid.org/packages/com.termux/) (la version du Play Store n'est plus à jour), et si tu veux que Ledger démarre avec le téléphone, **Termux:Boot** (ouvre-le une fois).
+2. Dans Termux :
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Nolanndch/ledger/main/termux/install.sh | bash
+   ```
+3. Ouvre `http://localhost:4747` dans Chrome, puis menu ⋮ → **Ajouter à l'écran d'accueil**.
+4. Réglages → **Synchronisation** → **Rejoindre un appareil**, saisis le code du Mac. Laisse « Remplacer les données de cet appareil » coché : le téléphone reprend tout ce qu'il y a sur le Mac.
+5. Dans les réglages Android de Termux, mets la batterie sur **Aucune restriction**, sinon le système finit par arrêter Ledger en arrière-plan. S'il est arrêté, ouvre Termux et tape `ledger`.
+
+Ensuite, la synchro se fait toute seule toutes les 30 secondes et à chaque ouverture de l'app. Si une même ligne a été modifiée sur les deux appareils avant la synchro, la modification la plus récente l'emporte. Après une restauration ou un import sur un appareil, c'est la version restaurée qui l'emporte ; ce qui n'existait que sur l'autre appareil revient.
+
+Le Mac est trouvé automatiquement sur le Wi-Fi, même si son adresse change. Si ce n'est pas le cas (réseau qui bloque la découverte), saisis l'adresse affichée dans ses réglages. Pour mettre Ledger à jour sur le téléphone : `ledger update`, puis `ledger`.
 
 ## Où sont mes données
 
@@ -98,6 +122,7 @@ Le dossier contient :
 | `ledger.db` | la base SQLite |
 | `backups/` | les sauvegardes quotidiennes |
 | `logs/` | le journal du serveur local |
+| `sync.json` | le jumelage avec l'autre appareil (code compris) |
 
 Sur Mac, le menu **Fichier → Afficher le dossier des données** l'ouvre dans le Finder. Le bouton de **Réglages → Base de données** fonctionne sur les deux systèmes. Pour changer d'ordinateur, y compris passer d'un Mac à un PC, exporte en JSON puis importe sur l'autre machine. Supprimer l'app ne supprime pas les données.
 

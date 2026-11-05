@@ -337,6 +337,10 @@ dialog h3 { font: 700 18px var(--f-display); letter-spacing: -.01em; }
 .only-app { display: none; }
 .mac-app .only-app { display: inline; }
 .mac-app .only-web { display: none; }
+.only-android { display: none; }
+.android .only-android { display: inline; }
+.android .only-web { display: none; }
+.sync-code { font: 600 15px var(--f-num); letter-spacing: .04em; user-select: all; }
 .mac-app:not(.fullscreen) .side { padding-top: 46px; }
 .mac-app:not(.fullscreen) .topbar-in { padding-top: 30px; }
 
@@ -523,3 +527,68 @@ tr.transfer td { color: var(--ink-2); }
 #invContent, #subContent { display: grid; gap: 20px; }
 .summary-strip > div, .ledger-strip > div { overflow: hidden; }
 .kpi-value { overflow: hidden; text-overflow: ellipsis; }
+
+/* ================= téléphone ================= */
+.tabbar { display: none; }
+@media (max-width: 860px) {
+  /* navigation du bas, le tiroir latéral reste accessible par « Plus » */
+  .tabbar {
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; inset: auto 0 0 0; z-index: 20;
+    background: color-mix(in srgb, var(--sheet) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--rule); padding: 4px max(4px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
+  }
+  .tabbar button { display: grid; justify-items: center; gap: 2px; padding: 6px 2px; border-radius: var(--r-sm); color: var(--ink-3); font-size: 10.5px; font-weight: 500; min-width: 0; }
+  .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabbar svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .tabbar #tabMore svg { fill: currentColor; }
+  .tabbar button[aria-current="true"] { color: var(--accent); }
+  .menu-btn { display: none; }
+  .content { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .toasts { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  .side { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+
+  /* en-tête sur une ligne */
+  .topbar-in { flex-wrap: nowrap; gap: 8px; padding-block: 10px; }
+  .topbar h1, .topbar .scope { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .scope { display: block; }
+  .period-btn { padding: 8px 10px; gap: 6px; }
+  .period-btn svg:last-child { display: none; }
+  .period-pop { right: 0; left: auto; }
+  #periodBtnLabel { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
+  #addTxBtn { width: 36px; height: 36px; padding: 0; justify-content: center; }
+
+  /* chiffres */
+  .ledger-strip .kpi-value { font-size: 18px; }
+  .kpi-value.hero { font-size: 26px; }
+  .ledger-strip > div, .summary-strip > div, .stat-grid > div { padding: 14px; }
+  .panel-head, .panel-body, .row, .filters, .edit-row, .add-row { padding-left: 14px; padding-right: 14px; }
+
+  /* grand livre : un appui sur la ligne ouvre le mouvement, l'icône crayon est superflue */
+  table.ledger tr.tx td:last-child, table.ledger thead th:last-child { padding: 0; width: 0; }
+  table.ledger tr.tx td:last-child .actions { display: none; }
+  .filters .select { flex: 1 1 40%; }
+  .filters .select { font-size: 14px; }
+  table.positions td.amt .faint { display: none; }
+
+  /* boîtes de dialogue en feuille montant du bas */
+  dialog, dialog.wide {
+    width: 100%; max-width: 100%; max-height: 92dvh; margin: auto 0 0; border-radius: 16px 16px 0 0; border-bottom: 0;
+  }
+  dialog form { padding: 18px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  dialog[open] { animation: sheet .22s ease-out; }
+  .dialog-actions { position: sticky; bottom: 0; background: var(--sheet); padding-top: 10px; }
+  .dialog-actions .btn { flex: 1; justify-content: center; padding-block: 11px; }
+  .dialog-actions .left { flex: 0 0 auto; }
+}
+@keyframes sheet { from { transform: translateY(40px); opacity: 0; } }
+
+/* cibles tactiles */
+@media (pointer: coarse) {
+  .icon-btn { width: 36px; height: 36px; }
+  .nav-item { padding: 10px; }
+  .seg button { padding: 7px 12px; }
+  .period-presets button { padding: 10px; }
+  .input:not(.amount-input), .select { padding: 9px 10px; font-size: 16px; }
+  .input.search { padding-left: 34px; }
+  .btn.small { padding: 7px 12px; }
+}

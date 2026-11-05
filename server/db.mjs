@@ -61,8 +61,12 @@ export const LATEST_SCHEMA = MIGRATIONS.length;
 
 // Ouvre la base et applique les migrations manquantes. `beforeMigrate(from, to)` est appelé avant
 // toute migration d'une base qui contient déjà des données (sauvegarde de sécurité).
+// Fonctions appelées à chaque ouverture de connexion, avant les migrations (ex. fonctions SQL utilisées par des triggers).
+export const connectHooks = [];
+
 export function open(beforeMigrate = () => {}) {
   db = new DatabaseSync(DB_PATH);
+  for (const hook of connectHooks) hook(db);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
   let version = schemaVersion();

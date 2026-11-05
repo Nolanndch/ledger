@@ -10,6 +10,7 @@ import { open, close, all, get, run, tx, insert, update, existsIn, need, HttpErr
 import { backup, dailyBackup, keepBeforeMigration, listBackups, restoreBackup } from "./server/backup.mjs";
 import * as L from "./server/ledger.mjs";
 import * as I from "./server/invest.mjs";
+import * as Sync from "./server/sync.mjs";
 import { getState, exportState, importState, info, csvTransactions, csvOperations } from "./server/io.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,9 @@ const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i 
 const PORT = Number(argVal("--port") || process.env.LEDGER_PORT || 4747);
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version; } catch { return "dev"; } })();
 
-const reopen = () => open((from, to) => keepBeforeMigration(DB.db, from, to));
+const reopen = () => { open((from, to) => keepBeforeMigration(DB.db, from, to)); Sync.ensure(); };
+// Après un import ou une restauration : le contenu de la base vient d'être remplacé.
+const reopenReplaced = () => { open((from, to) => keepBeforeMigration(DB.db, from, to)); Sync.ensure({ replaced: true }); };
 
 // ---------- HTTP ----------
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
@@ -49,7 +52,8 @@ async function api(req, res, parts, query) {
   switch (resource) {
     case "state": L.materializeRecurring(); return ok(getState(VERSION));
     case "info": return ok(info(VERSION));
-    case "ping": return ok({ ok: true });
+    case "ping": return ok({ ok: true, rev: Sync.revision() });
+    case "sync": return ok(await Sync.handle(method, id, body));
     case "settings":
       if (method === "GET") return ok(L.getSettings());
       if (method === "PUT") return ok(L.putSettings(body));
@@ -61,12 +65,12 @@ async function api(req, res, parts, query) {
       return send(res, 200, JSON.stringify(exportState(), null, 2), { "Content-Disposition": `attachment; filename="ledger-${date}.json"` });
     }
     case "import":
-      if (method === "POST") { importState(body, reopen); return ok({ ok: true }); }
+      if (method === "POST") { importState(body, reopenReplaced); return ok({ ok: true }); }
       break;
     case "backups":
       if (method === "GET") return ok(listBackups());
       if (method === "POST" && !id) return ok({ name: backup("manuelle") }, 201);
-      if (method === "POST" && parts.at(-1) === "restore") { restoreBackup(decodeURIComponent(parts.slice(1, -1).join("/")), reopen); return ok({ ok: true }); }
+      if (method === "POST" && parts.at(-1) === "restore") { restoreBackup(decodeURIComponent(parts.slice(1, -1).join("/")), reopenReplaced); return ok({ ok: true }); }
       break;
     case "reveal": {
       const [cmd, cmdArgs] = { darwin: ["open", ["-R", DB_PATH]], win32: ["explorer.exe", [`/select,${DB_PATH}`]] }[process.platform] || ["xdg-open", [DATA_DIR]];
@@ -152,11 +156,22 @@ function serveStatic(req, res, pathname) {
 // L'API n'écoute que 127.0.0.1, mais une page web ouverte dans le navigateur peut quand même viser ce port.
 // On refuse les requêtes venant d'un autre site (CSRF) et les noms d'hôte inconnus (DNS rebinding).
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+// Accès depuis le téléphone : Tailscale Serve publie https://<mac>.<tailnet>.ts.net pour tes seuls appareils et relaie vers
+// 127.0.0.1. Ces noms pointent vers des adresses Tailscale, jamais vers 127.0.0.1, donc pas de DNS rebinding possible.
+const TAILNET_HOST = /^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net$/i;
+const hostAllowed = (host) => ALLOWED_HOSTS.has(host) || TAILNET_HOST.test(host || "");
 function checkOrigin(req) {
-  if (!ALLOWED_HOSTS.has(req.headers.host)) throw new HttpError(403, "Hôte non autorisé.");
+  const host = req.headers.host;
+  if (!hostAllowed(host)) throw new HttpError(403, "Hôte non autorisé.");
+  // Tailscale Funnel ouvrirait l'accès à tout Internet : refusé, même si quelqu'un l'active par erreur.
+  if (req.headers["tailscale-funnel-request"]) throw new HttpError(403, "Accès public refusé.");
   if (req.headers["sec-fetch-site"] === "cross-site") throw new HttpError(403, "Requête d'un autre site refusée.");
   const origin = req.headers.origin;
-  if (req.method !== "GET" && origin && !ALLOWED_HOSTS.has(origin.replace(/^http:\/\//, ""))) throw new HttpError(403, "Requête d'un autre site refusée.");
+  if (req.method !== "GET" && origin) {
+    let originHost = null;
+    try { originHost = new URL(origin).host; } catch {}
+    if (originHost !== host) throw new HttpError(403, "Requête d'un autre site refusée.");
+  }
 }
 
 // ---------- démarrage ----------
@@ -168,7 +183,7 @@ catch (e) {
 
 const importFile = argVal("--import");
 if (importFile) {
-  try { importState(JSON.parse(fs.readFileSync(importFile, "utf8")), reopen); }
+  try { importState(JSON.parse(fs.readFileSync(importFile, "utf8")), reopenReplaced); }
   catch (e) { console.error(e.message); process.exit(1); }
   console.log(`Importé : ${importFile} → ${DB_PATH}`);
   close();
@@ -195,7 +210,7 @@ const server = http.createServer(async (req, res) => {
     send(res, status, { error: status === 500 ? `Erreur interne : ${e.message}` : e.message });
   }
 });
-server.listen(PORT, "127.0.0.1", () => console.log(`Ledger ${VERSION} → http://localhost:${PORT}  (base : ${DB_PATH})`));
+server.listen(PORT, "127.0.0.1", () => { console.log(`Ledger ${VERSION} → http://localhost:${PORT}  (base : ${DB_PATH})`); Sync.start(); });
 const shutdown = () => { server.close(); close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

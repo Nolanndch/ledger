@@ -48,14 +48,14 @@ function positionsTable(rows, groupByAsset) {
   const hideAcc = groupByAsset || selected !== "all";
   if (!rows.length) return `<div class="empty">Aucune position ouverte.</div>`;
   return `<div class="table-wrap"><table class="positions"><thead><tr>
-    <th>Actif</th>${hideAcc ? "" : `<th class="hide-sm">Compte</th>`}<th class="r">Quantité</th><th class="r" title="Prix de revient unitaire : prix moyen payé par titre, frais inclus">PRU</th><th class="r">Cours</th><th class="r">Valeur</th><th class="r">Plus-value latente</th></tr></thead>
+    <th>Actif</th>${hideAcc ? "" : `<th class="hide-sm">Compte</th>`}<th class="r">Quantité</th><th class="r hide-sm" title="Prix de revient unitaire : prix moyen payé par titre, frais inclus">PRU</th><th class="r hide-sm">Cours</th><th class="r">Valeur</th><th class="r">Plus-value latente</th></tr></thead>
     <tbody>${rows.map((p) => {
       const asset = S.assets.find((a) => a.symbol === p.asset);
       const pct = p.cost ? p.unrealized / p.cost : null;
       return `<tr><td><b>${esc(p.asset)}</b>${asset?.name ? `<div class="meta">${esc(asset.name)}</div>` : ""}</td>
         ${hideAcc ? "" : `<td class="hide-sm muted">${esc(p.accountName)}</td>`}
-        <td class="r num">${fmtQty(p.qty)}</td><td class="r num">${fmtExact(p.avg)}</td>
-        <td class="r num">${p.estimated ? `<span class="faint" title="Cours non renseigné : dernier prix d'achat ou de vente">${fmtExact(p.price)}*</span>` : fmtExact(p.price)}</td>
+        <td class="r num">${fmtQty(p.qty)}</td><td class="r num hide-sm">${fmtExact(p.avg)}</td>
+        <td class="r num hide-sm">${p.estimated ? `<span class="faint" title="Cours non renseigné : dernier prix d'achat ou de vente">${fmtExact(p.price)}*</span>` : fmtExact(p.price)}</td>
         <td class="r amt">${fmtCents(p.marketValue)}</td>
         <td class="r amt ${p.unrealized >= 0 ? "up" : "down"}">${fmtSignedCents(p.unrealized)} <span class="faint">${fmtPct(pct)}</span></td></tr>`;
     }).join("")}</tbody></table></div>

@@ -101,7 +101,10 @@ function renderLedger() {
   }[key];
   const sortList = (l) => l.sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
   sortList(past); future.sort((a, b) => a.date.localeCompare(b.date));
-  const span = cols.length;
+  // Sur téléphone les colonnes hide-sm sont masquées : les lignes de total doivent couvrir uniquement les colonnes visibles.
+  const small = SMALL.matches;
+  const span = small ? cols.filter((c) => !(c.cls || "").includes("hide-sm")).length : cols.length;
+  const right = small ? 2 : 3;
   const out = [];
   if (future.length) {
     const s = pnl(future);
@@ -116,16 +119,18 @@ function renderLedger() {
     if (key === "date" && k !== lastMonth) {
       lastMonth = k;
       const p = pnl(months[k]);
-      out.push(`<tr class="month"><td colspan="${span - 3}">${monthLabel(k, true).replace(/^./, (c) => c.toUpperCase())} · ${months[k].length} mouvement${months[k].length > 1 ? "s" : ""}</td><td colspan="3" class="r num ${p.result >= 0 ? "up" : "down"}">${fmtSigned(p.result)}</td></tr>`);
+      out.push(`<tr class="month"><td colspan="${span - right}">${monthLabel(k, true).replace(/^./, (c) => c.toUpperCase())} · ${months[k].length} mouvement${months[k].length > 1 ? "s" : ""}</td><td colspan="${right}" class="r num ${p.result >= 0 ? "up" : "down"}">${fmtSigned(p.result)}</td></tr>`);
     }
     out.push(row(x, cols, balance));
   }
   $("#txBody").innerHTML = out.join("");
   $("#txEmpty").hidden = list.length > 0;
   const s = pnl(past);
-  $("#txFoot").innerHTML = past.length ? `<tr><td colspan="${span - 3}">Total hors virements · ${past.length} mouvement${past.length > 1 ? "s" : ""}${s.pRevenue - s.pExpenses ? ` <span class="faint" style="font-weight:400">(${fmtSigned(s.pRevenue - s.pExpenses)} en attente non compté)</span>` : ""}${s.transfers ? `<div class="faint" style="font-weight:400;font-size:12px">virements vers les placements : ${fmtSigned(-s.transfers)}</div>` : ""}</td><td colspan="3" class="amt r ${s.result >= 0 ? "up" : "down"}"><span>${fmtSigned(s.result)}</span></td></tr>` : "";
+  $("#txFoot").innerHTML = past.length ? `<tr><td colspan="${span - right}">Total hors virements · ${past.length} mouvement${past.length > 1 ? "s" : ""}${s.pRevenue - s.pExpenses ? ` <span class="faint" style="font-weight:400">(${fmtSigned(s.pRevenue - s.pExpenses)} en attente non compté)</span>` : ""}${s.transfers ? `<div class="faint" style="font-weight:400;font-size:12px">virements vers les placements : ${fmtSigned(-s.transfers)}</div>` : ""}</td><td colspan="${right}" class="amt r ${s.result >= 0 ? "up" : "down"}"><span>${fmtSigned(s.result)}</span></td></tr>` : "";
 }
 
+const SMALL = matchMedia("(max-width: 860px)");
+SMALL.addEventListener("change", renderLedger);
 $("#fSearch").addEventListener("input", renderLedger);
 ["#fType", "#fStatus", "#fNature", "#fCategory"].forEach((s) => $(s).addEventListener("change", renderLedger));
 root.addEventListener("click", (e) => {

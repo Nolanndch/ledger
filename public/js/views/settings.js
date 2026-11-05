@@ -1,5 +1,5 @@
 // Vue Réglages : business, catégories, base de données, import/export
-import { $, $$, esc, fmt, fmtExact, fmtDate, relTime, fmtBytes, store, ICON, S, ui, mutate, toast, confirmBox, formBox, domainById, catById, activeDomains, registerView, render, setScope, onClick, onChange, applyTheme, saveSettings, setDiscreet, display, PERIODS, VIEW_TITLES } from "../core.js";
+import { $, $$, api, refresh, esc, fmt, fmtExact, fmtDate, relTime, fmtBytes, store, ICON, S, ui, mutate, toast, confirmBox, formBox, domainById, catById, activeDomains, registerView, render, setScope, onClick, onChange, applyTheme, saveSettings, setDiscreet, display, PERIODS, VIEW_TITLES } from "../core.js";
 
 const root = $("#view-settings");
 root.innerHTML = `
@@ -26,6 +26,10 @@ root.innerHTML = `
       <div id="catEdit"></div>
       <form class="add-row" id="addCatForm"><input class="input" id="newCat" placeholder="Nouvelle catégorie" autocomplete="off"><button class="btn">Ajouter</button></form>
     </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>Synchronisation</h2><span class="hint">directe entre tes appareils sur le même Wi-Fi, sans serveur intermédiaire</span></div>
+    <div class="panel-body" id="syncBody" style="display:grid;gap:14px;"></div>
   </div>
   <div class="grid-2 even">
     <div class="panel">
@@ -91,6 +95,7 @@ export function renderSettings() {
         <span class="chip neutral">${esc(label)}</span><button class="btn small" data-restore="${esc(b.name)}">Restaurer</button></div>`;
     }).join("") : `<div class="empty">Aucune sauvegarde pour l'instant.</div>`;
   }
+  loadSync();
   const theme = store.get("theme", "system");
   $$("#themeSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme)));
   const st = S.settings || {};
@@ -179,6 +184,77 @@ $("#importFile").addEventListener("change", async (e) => {
   const n = data.transactions?.length ?? 0;
   if (!(await confirmBox(`Importer ${file.name} ?`, `${n} mouvement${n > 1 ? "s" : ""} trouvé${n > 1 ? "s" : ""}. Toutes les données actuelles seront remplacées (une sauvegarde est faite avant).`, "Importer"))) return;
   await mutate("POST", "import", data, "Import terminé");
+});
+
+// ---------- synchronisation ----------
+let syncState = null;
+async function loadSync() {
+  try { syncState = await (await fetch("/api/sync")).json(); } catch { return; }
+  renderSync();
+}
+function renderSync() {
+  const st = syncState, box = $("#syncBody");
+  if (!st || !box) return;
+  if (st.role === "host") {
+    const clients = st.clients.length ? st.clients.map((c) => `${esc(c.name)} <span class="faint">· ${relTime(c.lastSync)}</span>`).join("<br>") : `<span class="faint">aucun pour l'instant</span>`;
+    box.innerHTML = `
+      <dl class="facts">
+        <dt>Code de jumelage</dt><dd><code class="sync-code">${esc(st.code)}</code></dd>
+        <dt>Adresse</dt><dd class="num" style="font-size:12.5px">${st.addresses.map(esc).join("<br>") || esc(st.hostname + ":" + st.port)}</dd>
+        <dt>Appareils reliés</dt><dd>${clients}</dd>
+      </dl>
+      ${st.listening ? "" : `<p class="warn">${esc(st.listenError || "L'écoute sur le réseau n'a pas démarré.")}</p>`}
+      <p class="hint">Sur le téléphone : Réglages → Synchronisation → Rejoindre, puis saisis ce code. L'adresse est trouvée toute seule sur le Wi-Fi. Les changements arrivent ici dans la minute.</p>
+      <div class="btn-row"><button class="btn small" data-sync-code>Nouveau code</button><button class="btn small danger" data-sync-stop>Arrêter la synchronisation</button></div>`;
+  } else if (st.role === "client") {
+    box.innerHTML = `
+      <dl class="facts">
+        <dt>Relié à</dt><dd>${esc(st.hostName || "?")} <span class="faint num" style="font-size:12px">${esc(st.url.replace(/^http:\/\//, ""))}</span></dd>
+        <dt>Dernière synchro</dt><dd>${st.lastSync ? relTime(st.lastSync) : "jamais"}</dd>
+      </dl>
+      ${st.lastError ? `<p class="warn">${esc(st.lastError)}</p>` : ""}
+      <p class="hint">Synchro automatique toutes les 30 secondes quand les deux appareils sont sur le même Wi-Fi, et à chaque ouverture de l'app.</p>
+      <div class="btn-row"><button class="btn small primary" data-sync-now>Synchroniser maintenant</button><button class="btn small" data-sync-replace>Reprendre toutes les données de ${esc(st.hostName || "l'hôte")}…</button><button class="btn small danger" data-sync-stop>Arrêter</button></div>`;
+  } else {
+    box.innerHTML = `
+      <p class="muted" style="margin:0;font-size:13px">Relie ce Mac et ton téléphone : dès qu'ils sont sur le même Wi-Fi, ils s'échangent les changements directement, chiffrés avec un code de jumelage. Le Mac est l'hôte, le téléphone le rejoint.</p>
+      <div class="btn-row"><button class="btn small primary" data-sync-host>Cet appareil est l'hôte (Mac)</button><button class="btn small" data-sync-join>Rejoindre un appareil (téléphone)…</button></div>`;
+  }
+}
+async function syncCall(action, okMsg) {
+  try { syncState = await api("POST", "sync/" + action); renderSync(); await refresh(); if (okMsg) toast(okMsg); return true; }
+  catch (e) { toast(e.message, null, true); loadSync(); return false; }
+}
+onClick("syncHost", () => syncCall("host", "Synchronisation activée : saisis le code sur le téléphone"));
+onClick("syncCode", async () => {
+  if (await confirmBox("Changer le code ?", "Les appareils déjà reliés devront saisir le nouveau code.", "Changer")) syncCall("new-code", "Nouveau code créé");
+});
+onClick("syncStop", async () => {
+  if (await confirmBox("Arrêter la synchronisation ?", "Les données restent sur chaque appareil. Il faudra refaire le jumelage pour synchroniser à nouveau.", "Arrêter")) syncCall("stop", "Synchronisation arrêtée");
+});
+onClick("syncNow", async (_, el) => {
+  el.disabled = true;
+  try { const r = await api("POST", "sync/now"); syncState = r; await refresh(); toast(`Synchronisé : ${r.result.sent} envoyé${r.result.sent > 1 ? "s" : ""}, ${r.result.received} reçu${r.result.received > 1 ? "s" : ""}`); }
+  catch (e) { toast(e.message, null, true); loadSync(); }
+  finally { el.disabled = false; }
+});
+onClick("syncReplace", async () => {
+  if (await confirmBox(`Reprendre les données de ${syncState?.hostName || "l'hôte"} ?`, "Toutes les données de cet appareil sont remplacées par celles de l'autre (une sauvegarde est faite avant). Les changements pas encore synchronisés seront perdus.", "Remplacer")) syncCall("replace", "Données reprises");
+});
+onClick("syncJoin", async () => {
+  const ok = await formBox("Rejoindre un appareil", `
+    <p class="muted" style="margin:0;font-size:13px">Sur le Mac : Réglages → Synchronisation → « Cet appareil est l'hôte ». Les deux appareils doivent être sur le même Wi-Fi.</p>
+    <div class="field"><label>Code de jumelage</label><input class="input num" name="code" placeholder="ABCD-EFGH-JKMN-PQRS-TUVW" autocapitalize="characters" autocomplete="off" spellcheck="false" required></div>
+    <div class="field"><label>Adresse du Mac <span class="faint">(facultatif)</span></label><input class="input num" name="url" placeholder="trouvée automatiquement" autocomplete="off" inputmode="url"></div>
+    <label class="check"><input type="checkbox" name="replace" checked><span>Remplacer les données de cet appareil par celles du Mac <span class="faint">(conseillé pour un nouveau téléphone ; sinon les deux sont fusionnées)</span></span></label>`,
+  "Relier", async (v) => {
+    try { syncState = await api("POST", "sync/join", { code: v.code, url: v.url, replace: v.replace }); return null; }
+    catch (e) { return e.message; }
+  });
+  if (!ok) return;
+  renderSync();
+  await refresh();
+  toast(`Relié à ${syncState.hostName || "l'hôte"}`);
 });
 
 registerView("settings", { title: "Réglages", render: renderSettings, usesPeriod: false, usesScope: false });

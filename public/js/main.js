@@ -50,7 +50,9 @@ document.addEventListener("change", (e) => {
 $("#addTxBtn").addEventListener("click", () => openTx());
 $("#manageDomainsLink").addEventListener("click", () => go("settings"));
 $("#dbPill").addEventListener("click", () => go("settings"));
-$("#menuBtn").addEventListener("click", () => { $("#side").classList.add("open"); $("#scrim").classList.add("open"); });
+const openSide = () => { $("#side").classList.add("open"); $("#scrim").classList.add("open"); };
+$("#menuBtn").addEventListener("click", openSide);
+$("#tabMore").addEventListener("click", openSide);
 $("#scrim").addEventListener("click", closeSide);
 $("#retryBtn").addEventListener("click", refresh);
 $("#discreetBtn").addEventListener("click", () => setDiscreet(!display.discreet));
@@ -67,11 +69,20 @@ document.addEventListener("keydown", (e) => {
 let resizeT;
 window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(render, 120); });
 // Données fraîches quand on revient sur l'onglet (récurrences du jour, modifications ailleurs)
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+// et synchro immédiate avec l'autre appareil si celui-ci en rejoint un.
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden) return;
+  await refresh();
+  try {
+    const res = await fetch("/api/sync/now", { method: "POST" });
+    if (res.ok && (await res.json()).result?.received) refresh();
+  } catch { /* pas de synchro configurée ou hors du Wi-Fi */ }
+});
 
 // ================= démarrage =================
 applyTheme();
 if (/LedgerMac\//.test(navigator.userAgent)) document.documentElement.classList.add("mac-app");
+if (/Android/.test(navigator.userAgent)) document.documentElement.classList.add("android");
 // Commandes appelées par les menus de l'app Mac
 window.ledger = { newTx: () => { if (!document.querySelector("dialog[open]")) openTx(); }, go: (v) => VIEW_TITLES[v] && go(v), refresh };
 if (!VIEW_TITLES[ui.view]) ui.view = "dashboard";
