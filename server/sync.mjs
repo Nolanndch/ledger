@@ -405,10 +405,10 @@ export async function handle(method, action, body) {
     }
     case "now":
       need(conf.role === "client", "Cet appareil n'est relié à aucun autre.");
-      return { ...status(), result: await syncNow() };
+      { const result = await syncNow(); return { ...status(), result }; }
     case "replace": // reprendre toutes les données de l'hôte
       need(conf.role === "client", "Cet appareil n'est relié à aucun autre.");
-      return { ...status(), result: await syncNow({ full: true }) };
+      { const result = await syncNow({ full: true }); return { ...status(), result }; }
     case "stop":
       stopHost(); stopClient();
       Object.assign(conf, { role: null, code: null, client: null, clients: {} });

@@ -43,7 +43,8 @@ cat > "$PLIST" <<EOF
 EOF
 
 launchctl bootout "gui/$(id -u)/com.ledger.server" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# bootout rend la main avant que le service soit vraiment déchargé : on réessaie quelques fois.
+for i in $(seq 1 20); do launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break; [ "$i" = 20 ] && launchctl bootstrap "gui/$(id -u)" "$PLIST"; sleep 0.5; done
 
 for _ in $(seq 1 20); do curl -fs "http://localhost:$PORT/api/info" >/dev/null && break; sleep 0.25; done
 if curl -fs "http://localhost:$PORT/api/info" >/dev/null; then
