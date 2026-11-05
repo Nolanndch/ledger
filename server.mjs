@@ -6,12 +6,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as DB from "./server/db.mjs";
-import { open, close, all, get, run, tx, insert, update, existsIn, need, HttpError, uid, today, DB_PATH, DATA_DIR } from "./server/db.mjs";
-import { backup, dailyBackup, keepBeforeMigration, listBackups, restoreBackup } from "./server/backup.mjs";
+import { open, close, HttpError, DB_PATH, DATA_DIR } from "./server/db.mjs";
+import { dailyBackup, keepBeforeMigration } from "./server/backup.mjs";
 import * as L from "./server/ledger.mjs";
-import * as I from "./server/invest.mjs";
 import * as Sync from "./server/sync.mjs";
-import { getState, exportState, importState, info, csvTransactions, csvOperations } from "./server/io.mjs";
+import { importState } from "./server/io.mjs";
+import { handle } from "./server/api.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, "public");
@@ -23,6 +23,13 @@ const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT,
 const reopen = () => { open((from, to) => keepBeforeMigration(DB.db, from, to)); Sync.ensure(); };
 // Après un import ou une restauration : le contenu de la base vient d'être remplacé.
 const reopenReplaced = () => { open((from, to) => keepBeforeMigration(DB.db, from, to)); Sync.ensure({ replaced: true }); };
+const CTX = {
+  version: VERSION, reopen, reopenReplaced,
+  reveal() {
+    const [cmd, cmdArgs] = { darwin: ["open", ["-R", DB_PATH]], win32: ["explorer.exe", [`/select,${DB_PATH}`]] }[process.platform] || ["xdg-open", [DATA_DIR]];
+    spawn(cmd, cmdArgs, { detached: true, stdio: "ignore" }).unref();
+  },
+};
 
 // ---------- HTTP ----------
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
@@ -40,109 +47,10 @@ async function readBody(req) {
   try { return JSON.parse(raw); } catch { throw new HttpError(400, "JSON invalide."); }
 }
 
-// Collections simples (création, modification, suppression génériques)
-const SIMPLE = { domains: "domains", categories: "categories", objectives: "objectives" };
-
 async function api(req, res, parts, query) {
-  const [resource, id, action] = parts;
-  const method = req.method;
-  const body = ["POST", "PUT", "PATCH"].includes(method) ? await readBody(req) : {};
-  const ok = (data, status = 200) => send(res, status, data);
-
-  switch (resource) {
-    case "state": L.materializeRecurring(); return ok(getState(VERSION));
-    case "info": return ok(info(VERSION));
-    case "ping": return ok({ ok: true, rev: Sync.revision() });
-    case "sync": return ok(await Sync.handle(method, id, body));
-    case "settings":
-      if (method === "GET") return ok(L.getSettings());
-      if (method === "PUT") return ok(L.putSettings(body));
-      break;
-    case "export": {
-      const date = today();
-      if (id === "csv") return send(res, 200, csvTransactions(), { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="ledger-${date}.csv"` });
-      if (id === "csv-invest") return send(res, 200, csvOperations(), { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="ledger-placements-${date}.csv"` });
-      return send(res, 200, JSON.stringify(exportState(), null, 2), { "Content-Disposition": `attachment; filename="ledger-${date}.json"` });
-    }
-    case "import":
-      if (method === "POST") { importState(body, reopenReplaced); return ok({ ok: true }); }
-      break;
-    case "backups":
-      if (method === "GET") return ok(listBackups());
-      if (method === "POST" && !id) return ok({ name: backup("manuelle") }, 201);
-      if (method === "POST" && parts.at(-1) === "restore") { restoreBackup(decodeURIComponent(parts.slice(1, -1).join("/")), reopenReplaced); return ok({ ok: true }); }
-      break;
-    case "reveal": {
-      const [cmd, cmdArgs] = { darwin: ["open", ["-R", DB_PATH]], win32: ["explorer.exe", [`/select,${DB_PATH}`]] }[process.platform] || ["xdg-open", [DATA_DIR]];
-      spawn(cmd, cmdArgs, { detached: true, stdio: "ignore" }).unref();
-      return ok({ ok: true });
-    }
-
-    case "transactions":
-      if (id === "bulk" && method === "POST") return ok(L.restoreTransactions(body.rows), 201);
-      if (method === "POST" && !id) return ok(L.createTransaction(body), 201);
-      if (id && action === "refund" && method === "POST") return ok(L.refund(id, body), 201);
-      if (id && method === "PUT") return ok(L.updateTransaction(id, body));
-      if (id && method === "DELETE") return ok({ ok: true, deleted: L.deleteTransaction(id) });
-      break;
-    case "installments":
-      if (method === "POST") return ok(L.createInstallments(body), 201);
-      if (id && method === "DELETE") return ok({ deleted: L.deleteInstallments(id, Number(query.get("from")) || 1) });
-      break;
-    case "recurring":
-      if (method === "POST" && !id) return ok(L.createRecurring(body), 201);
-      if (id && action === "cancel" && method === "POST") return ok(L.cancelRecurring(id, body));
-      if (id && action === "reactivate" && method === "POST") return ok(L.reactivateRecurring(id));
-      if (id && method === "PUT") return ok(L.updateRecurring(id, body));
-      if (id && method === "DELETE") return ok(L.deleteRecurring(id, { force: query.has("force"), withPayments: query.has("withPayments") }));
-      break;
-
-    case "accounts":
-      if (method === "POST" && !id) return ok(I.createAccount(body), 201);
-      if (id && action === "close" && method === "POST") return ok(I.closeAccount(id, body));
-      if (id && action === "reopen" && method === "POST") return ok(I.reopenAccount(id));
-      if (id && method === "PUT") return ok(I.updateAccount(id, body));
-      if (id && method === "DELETE") return ok(I.deleteAccount(id, { purge: query.has("purge") }));
-      break;
-    case "operations":
-      if (method === "POST" && !id) return ok(I.createOperation(body), 201);
-      if (id && method === "PUT") return ok(I.updateOperation(id, body));
-      if (id && method === "DELETE") return ok(I.deleteOperation(id));
-      break;
-    case "assets":
-      if (id && method === "PUT") return ok(I.putAsset(id, body));
-      break;
-
-    case "domains":
-      if (id === "reorder" && method === "POST") {
-        need(Array.isArray(body.ids), "Liste invalide.");
-        tx(() => body.ids.forEach((d, i) => run("UPDATE domains SET position = ? WHERE id = ?", i, d)));
-        return ok({ ok: true });
-      }
-    // fallthrough vers les collections simples
-    default:
-      if (SIMPLE[resource]) {
-        const table = SIMPLE[resource];
-        if (method === "POST" && !id) {
-          const newId = body.id && !existsIn(table, body.id) ? String(body.id) : uid();
-          insert(table, L.schema[table](body), newId);
-          return ok(L.fetchOne(table, newId), 201);
-        }
-        const prev = id && L.fetchOne(table, id);
-        if (!prev) throw new HttpError(404, "Élément introuvable.");
-        if (method === "PUT") { update(table, id, L.schema[table](body, prev)); return ok(L.fetchOne(table, id)); }
-        if (method === "DELETE") {
-          if (table === "domains") {
-            const n = get("SELECT COUNT(*) n FROM transactions WHERE domain_id = ?", id).n;
-            if (n) throw new HttpError(409, `Ce business a ${n} mouvement${n > 1 ? "s" : ""}. Archive-le plutôt pour garder l'historique.`);
-            run("UPDATE objectives SET domain_id = NULL WHERE domain_id = ?", id);
-          }
-          run(`DELETE FROM ${table} WHERE id = ?`, id);
-          return ok({ ok: true, deleted: prev });
-        }
-      }
-  }
-  throw new HttpError(404, "Route inconnue.");
+  const body = ["POST", "PUT", "PATCH"].includes(req.method) ? await readBody(req) : {};
+  const r = await handle({ method: req.method, parts, query, body }, CTX);
+  send(res, r.status, r.body, r.headers);
 }
 
 function serveStatic(req, res, pathname) {

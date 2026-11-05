@@ -36,7 +36,7 @@ root.innerHTML = `
       <div class="panel-head"><h2>Base de données</h2><span class="chip paid">SQLite locale</span></div>
       <div class="panel-body" style="display:grid;gap:16px;">
         <dl class="facts" id="dbFacts"></dl>
-        <div class="btn-row"><button class="btn small" id="revealBtn">Afficher le fichier</button><button class="btn small" id="backupNowBtn">Sauvegarder maintenant</button></div>
+        <div class="btn-row"><button class="btn small not-app" id="revealBtn">Afficher le fichier</button><button class="btn small" id="backupNowBtn">Sauvegarder maintenant</button></div>
       </div>
     </div>
     <div class="panel">
@@ -218,7 +218,7 @@ function renderSync() {
   } else {
     box.innerHTML = `
       <p class="muted" style="margin:0;font-size:13px">Relie ce Mac et ton téléphone : dès qu'ils sont sur le même Wi-Fi, ils s'échangent les changements directement, chiffrés avec un code de jumelage. Le Mac est l'hôte, le téléphone le rejoint.</p>
-      <div class="btn-row"><button class="btn small primary" data-sync-host>Cet appareil est l'hôte (Mac)</button><button class="btn small" data-sync-join>Rejoindre un appareil (téléphone)…</button></div>`;
+      <div class="btn-row"><button class="btn small primary not-app" data-sync-host>Cet appareil est l'hôte (Mac)</button><button class="btn small" data-sync-join>Rejoindre un appareil (téléphone)…</button></div>`;
   }
 }
 async function syncCall(action, okMsg) {

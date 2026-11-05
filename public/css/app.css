@@ -337,9 +337,9 @@ dialog h3 { font: 700 18px var(--f-display); letter-spacing: -.01em; }
 .only-app { display: none; }
 .mac-app .only-app { display: inline; }
 .mac-app .only-web { display: none; }
-.only-android { display: none; }
-.android .only-android { display: inline; }
-.android .only-web { display: none; }
+/* app Android : pas de serveur à relancer, pas de Finder, pas d'hôte de synchro */
+.android-app .only-web, .android-app .not-app { display: none; }
+.android-app .only-app { display: inline; }
 .sync-code { font: 600 15px var(--f-num); letter-spacing: .04em; user-select: all; }
 .mac-app:not(.fullscreen) .side { padding-top: 46px; }
 .mac-app:not(.fullscreen) .topbar-in { padding-top: 30px; }
@@ -567,6 +567,7 @@ tr.transfer td { color: var(--ink-2); }
   table.ledger tr.tx td:last-child, table.ledger thead th:last-child { padding: 0; width: 0; }
   table.ledger tr.tx td:last-child .actions { display: none; }
   .filters .select { flex: 1 1 40%; }
+  .btn-row .btn { white-space: normal; text-align: left; }
   .filters .select { font-size: 14px; }
   table.positions td.amt .faint { display: none; }
 

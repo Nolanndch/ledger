@@ -37,12 +37,16 @@ function save() {
   fs.renameSync(CONF_PATH + ".tmp", CONF_PATH);
 }
 if (!conf.deviceId) { conf.deviceId = crypto.randomBytes(6).toString("hex"); save(); }
-const computerName = (() => {
+let computerName = (() => {
   if (process.platform === "android") return "Téléphone";
   if (process.platform === "darwin") { try { return execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8" }).trim(); } catch {} }
   return os.hostname().split(".")[0];
 })();
 const deviceName = () => conf.name || computerName;
+// App Android : nom de l'appareil donné par le système, et découverte de l'hôte faite côté natif.
+export const setDefaultName = (name) => { if (name) computerName = name; };
+let nativeDiscover = null;
+export const setDiscover = (fn) => { nativeDiscover = fn; };
 
 // ---------- horloge et triggers ----------
 let clock = 0;
@@ -222,7 +226,10 @@ function startHost() {
   if (lanServer || conf.role !== "host" || !conf.code) return;
   listenError = null;
   lanServer = http.createServer(async (req, res) => {
-    const reply = (status, body) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(typeof body === "string" ? body : JSON.stringify(body)); };
+    // CORS : l'app Android appelle depuis sa WebView. Sans risque : tout passe chiffré et authentifié par le code.
+    const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" };
+    const reply = (status, body) => { res.writeHead(status, { "Content-Type": "application/json", ...cors }); res.end(typeof body === "string" ? body : JSON.stringify(body)); };
+    if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
     if (req.method !== "POST" || req.url !== "/sync") return reply(404, { error: "Introuvable." });
     try {
       let raw = "";
@@ -260,17 +267,23 @@ function addresses() {
 }
 
 // ---------- client ----------
-export function discover(timeout = 1500) {
+const parseReplies = (replies) => {
+  const found = new Map();
+  for (const { msg, address } of replies) {
+    const r = /^LEDGER!([0-9a-f]+):(\d+):(.*)$/.exec(msg);
+    if (r && r[1] !== conf.deviceId) found.set(r[1], { deviceId: r[1], name: r[3], url: `http://${address}:${r[2]}` });
+  }
+  return [...found.values()];
+};
+export async function discover(timeout = 1500) {
+  if (nativeDiscover) return parseReplies(await nativeDiscover(SYNC_PORT, timeout));
   return new Promise((resolve) => {
-    const found = new Map();
+    const replies = [];
     let sock;
     try { sock = dgram.createSocket("udp4"); } catch { return resolve([]); }
-    const done = () => { try { sock.close(); } catch {} resolve([...found.values()]); };
+    const done = () => { try { sock.close(); } catch {} resolve(parseReplies(replies)); };
     sock.on("error", done);
-    sock.on("message", (m, rinfo) => {
-      const r = /^LEDGER!([0-9a-f]+):(\d+):(.*)$/.exec(m.toString());
-      if (r && r[1] !== conf.deviceId) found.set(r[1], { deviceId: r[1], name: r[3], url: `http://${rinfo.address}:${r[2]}` });
-    });
+    sock.on("message", (m, rinfo) => replies.push({ msg: m.toString(), address: rinfo.address }));
     // Plusieurs envois : le premier paquet se perd souvent quand le Wi-Fi du téléphone sort de veille.
     const targets = ["255.255.255.255"];
     try {
@@ -298,7 +311,7 @@ const normUrl = (u) => {
 
 async function post(url, body) {
   let res;
-  try { res = await fetch(url + "/sync", { method: "POST", body, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(20_000) }); }
+  try { res = await fetch(url + "/sync", { method: "POST", body, headers: { "Content-Type": "text/plain" } /* requête « simple » : pas de pré-vol CORS */, signal: AbortSignal.timeout(20_000) }); }
   catch { throw new HttpError(502, "Appareil injoignable : vérifie que les deux sont sur le même Wi-Fi et que Ledger est ouvert sur l'autre."); }
   const text = await res.text();
   if (!res.ok) { let m; try { m = JSON.parse(text).error; } catch {} throw new HttpError(res.status === 401 ? 401 : 502, m || `Erreur ${res.status} de l'autre appareil.`); }
@@ -353,7 +366,7 @@ function startClient() {
     syncNow().catch(() => {});
   };
   timer = setInterval(tick, CLIENT_EVERY);
-  timer.unref();
+  timer.unref?.();
   tick();
 }
 function stopClient() { clearInterval(timer); timer = null; }

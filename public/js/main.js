@@ -82,7 +82,7 @@ document.addEventListener("visibilitychange", async () => {
 // ================= démarrage =================
 applyTheme();
 if (/LedgerMac\//.test(navigator.userAgent)) document.documentElement.classList.add("mac-app");
-if (/Android/.test(navigator.userAgent)) document.documentElement.classList.add("android");
+if (/LedgerAndroid\//.test(navigator.userAgent)) document.documentElement.classList.add("android-app");
 // Commandes appelées par les menus de l'app Mac
 window.ledger = { newTx: () => { if (!document.querySelector("dialog[open]")) openTx(); }, go: (v) => VIEW_TITLES[v] && go(v), refresh };
 if (!VIEW_TITLES[ui.view]) ui.view = "dashboard";
@@ -95,4 +95,4 @@ refresh().then(() => {
   else render();
   try { sessionStorage.setItem("ledger.opened", "1"); } catch {}
 });
-if ("serviceWorker" in navigator && location.protocol.startsWith("http") && !/LedgerMac\//.test(navigator.userAgent)) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator && location.protocol.startsWith("http") && !/Ledger(Mac|Android)\//.test(navigator.userAgent)) navigator.serviceWorker.register("sw.js").catch(() => {});

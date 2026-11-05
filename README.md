@@ -79,9 +79,9 @@ macOS 12 ou plus récent (macOS 13 pour la version Intel). Rien d'autre à insta
 
 Windows 10 ou 11. L'interface s'ouvre dans une fenêtre d'application Microsoft Edge (sans onglets ni barre d'adresse). Edge est déjà installé sur tous les Windows récents.
 
-### Téléphone Android (synchronisé avec le Mac)
+### Téléphone Android
 
-Ledger tourne aussi sur le téléphone, avec sa propre base : il marche hors connexion, et le Mac et le téléphone s'échangent les changements **directement** dès qu'ils sont sur le même Wi-Fi. Aucun compte, aucun cloud, aucun serveur intermédiaire ; les échanges sont chiffrés avec un code de jumelage.
+Ledger existe en app Android (`Ledger-…apk`). Elle a sa propre base sur le téléphone et marche hors connexion ; le Mac et le téléphone s'échangent les changements **directement** dès qu'ils sont sur le même Wi-Fi. Aucun compte, aucun cloud, aucun serveur intermédiaire ; les échanges sont chiffrés avec un code de jumelage.
 
 **Sur le Mac**
 
@@ -94,18 +94,12 @@ Ledger tourne aussi sur le téléphone, avec sa propre base : il marche hors con
 
 **Sur le téléphone**
 
-1. Installe **Termux** depuis [F-Droid](https://f-droid.org/packages/com.termux/) (la version du Play Store n'est plus à jour), et si tu veux que Ledger démarre avec le téléphone, **Termux:Boot** (ouvre-le une fois).
-2. Dans Termux :
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/Nolanndch/ledger/main/termux/install.sh | bash
-   ```
-3. Ouvre `http://localhost:4747` dans Chrome, puis menu ⋮ → **Ajouter à l'écran d'accueil**.
-4. Réglages → **Synchronisation** → **Rejoindre un appareil**, saisis le code du Mac. Laisse « Remplacer les données de cet appareil » coché : le téléphone reprend tout ce qu'il y a sur le Mac.
-5. Dans les réglages Android de Termux, mets la batterie sur **Aucune restriction**, sinon le système finit par arrêter Ledger en arrière-plan. S'il est arrêté, ouvre Termux et tape `ledger`.
+1. Installe l'APK : copie-le sur le téléphone et ouvre-le (Android demande d'autoriser l'installation depuis cette source), ou branche le téléphone en USB et lance `INSTALL=1 android/build.sh` (voir [Développer](#développer)).
+2. Dans l'app : Réglages → **Synchronisation** → **Rejoindre un appareil**, saisis le code du Mac. Le Mac est trouvé tout seul sur le Wi-Fi. Laisse « Remplacer les données de cet appareil » coché : le téléphone reprend tout ce qu'il y a sur le Mac.
 
-Ensuite, la synchro se fait toute seule toutes les 30 secondes et à chaque ouverture de l'app. Si une même ligne a été modifiée sur les deux appareils avant la synchro, la modification la plus récente l'emporte. Après une restauration ou un import sur un appareil, c'est la version restaurée qui l'emporte ; ce qui n'existait que sur l'autre appareil revient.
+Ensuite, la synchro se fait toute seule à l'ouverture de l'app et toutes les 30 secondes tant qu'elle est ouverte. Si une même ligne a été modifiée sur les deux appareils avant la synchro, la modification la plus récente l'emporte. Après une restauration ou un import sur un appareil, c'est la version restaurée qui l'emporte ; ce qui n'existait que sur l'autre appareil revient.
 
-Le Mac est trouvé automatiquement sur le Wi-Fi, même si son adresse change. Si ce n'est pas le cas (réseau qui bloque la découverte), saisis l'adresse affichée dans ses réglages. Pour mettre Ledger à jour sur le téléphone : `ledger update`, puis `ledger`.
+Les exports (JSON, CSV) de l'app sont enregistrés dans le dossier Téléchargements du téléphone. Les données de l'app ne sont pas incluses dans la sauvegarde Google du téléphone.
 
 ## Où sont mes données
 
@@ -124,6 +118,8 @@ Le dossier contient :
 | `logs/` | le journal du serveur local |
 | `sync.json` | le jumelage avec l'autre appareil (code compris) |
 
+Sur Android, tout est dans les fichiers privés de l'app (supprimés avec elle).
+
 Sur Mac, le menu **Fichier → Afficher le dossier des données** l'ouvre dans le Finder. Le bouton de **Réglages → Base de données** fonctionne sur les deux systèmes. Pour changer d'ordinateur, y compris passer d'un Mac à un PC, exporte en JSON puis importe sur l'autre machine. Supprimer l'app ne supprime pas les données.
 
 ## Comment ça marche
@@ -139,6 +135,8 @@ Ledger.app
 Au lancement, l'app démarre `server.mjs` sur `127.0.0.1:4747`, accessible depuis ce Mac uniquement, puis affiche l'interface. Le serveur utilise le module `node:sqlite` intégré à Node, il n'a donc aucune dépendance npm. Il s'arrête quand tu quittes l'app.
 
 Sous Windows, `Ledger.exe` est un petit lanceur écrit en Go. Il démarre le même serveur avec le Node.js officiel pour Windows, puis ouvre la fenêtre Edge. Le serveur s'arrête tout seul 5 minutes après la fermeture de la dernière fenêtre.
+
+Quand la synchronisation est activée sur le Mac, le serveur écoute aussi sur le port 4748 du réseau local, uniquement pour la synchro : chaque échange est chiffré et authentifié avec le code de jumelage (AES-256-GCM), le reste de l'API reste limité à ce Mac. Les changements sont notés par des triggers SQLite dans une table `sync_log` (version de chaque ligne, horodatée par l'appareil qui l'a écrite).
 
 Tant que l'app est ouverte, l'interface est aussi disponible dans ton navigateur sur [http://localhost:4747](http://localhost:4747). Le serveur refuse les requêtes envoyées par d'autres sites web, qui ne peuvent donc pas modifier tes données en visant ce port.
 
@@ -173,12 +171,24 @@ La version Windows se construit depuis un Mac ou Linux. Il faut Go (`brew instal
 npm run build:windows          # dist/windows/Ledger/ et le zip
 ```
 
+L'app Android se construit sans Gradle, avec Android Studio installé (son Java et le SDK Android) :
+
+```bash
+npm run build:android                        # dist/Ledger-<version>.apk
+INSTALL=1 npm run build:android              # et l'installe sur le téléphone branché en USB (débogage USB activé)
+DEBUG=1 INSTALL=1 npm run build:android      # app débogable : la WebView s'inspecte depuis chrome://inspect
+```
+
+L'app n'embarque pas Node : l'interface et le moteur (`server/`) tournent dans une WebView, avec SQLite compilé en WebAssembly (sql.js) et de petits remplaçants des modules Node (`android/web/shims/`). Les paquets npm de `android/` ne servent qu'à cette construction. La clé de signature est créée au premier build dans `~/.android/ledger-release.jks` : garde-la, les mises à jour de l'app doivent être signées avec la même clé.
+
 Sans l'app, `./install.sh` installe Ledger comme service de fond accessible dans le navigateur, et `./uninstall.sh` le retire. N'utilise pas les deux en même temps.
 
 ## Structure
 
 ```
-server.mjs            serveur HTTP et routes de l'API
+server.mjs            serveur HTTP du Mac et de Windows
+server/api.mjs        routes de l'API, communes au serveur et à l'app Android
+server/sync.mjs       synchronisation directe entre appareils (journal de changements, chiffrement, découverte)
 server/               base SQLite, migrations, trésorerie, abonnements, placements, import/export, sauvegardes
 public/               interface (HTML, CSS et modules JS sans framework)
 public/js/dates.js    calcul des échéances, partagé par le serveur et l'interface
@@ -189,6 +199,7 @@ mac/build.sh          construction de Ledger.app
 mac/make-icon.swift   icône
 windows/main.go       lanceur Windows (Go)
 windows/build.sh      construction de la version Windows
+android/              app Android : activité Java, moteur web (runtime.js, shims) et build.sh
 demo/                 données fictives
 ```
 
