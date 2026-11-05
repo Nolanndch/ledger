@@ -271,8 +271,18 @@ export function discover(timeout = 1500) {
       const r = /^LEDGER!([0-9a-f]+):(\d+):(.*)$/.exec(m.toString());
       if (r && r[1] !== conf.deviceId) found.set(r[1], { deviceId: r[1], name: r[3], url: `http://${rinfo.address}:${r[2]}` });
     });
+    // Plusieurs envois : le premier paquet se perd souvent quand le Wi-Fi du téléphone sort de veille.
+    const targets = ["255.255.255.255"];
+    try {
+      for (const a of Object.values(os.networkInterfaces()).flat()) {
+        if (a?.family !== "IPv4" || a.internal) continue;
+        const ip = a.address.split(".").map(Number), mask = a.netmask.split(".").map(Number);
+        targets.push(ip.map((b, i) => (b & mask[i]) | (~mask[i] & 255)).join("."));
+      }
+    } catch { /* Android refuse parfois de lister les interfaces */ }
+    const ping = () => { for (const t of new Set(targets)) sock.send("LEDGER?", SYNC_PORT, t, () => {}); };
     sock.bind(() => {
-      try { sock.setBroadcast(true); sock.send("LEDGER?", SYNC_PORT, "255.255.255.255"); } catch { /* réseau sans broadcast */ }
+      try { sock.setBroadcast(true); ping(); setTimeout(ping, 300); setTimeout(ping, 800); } catch { /* réseau sans broadcast */ }
       setTimeout(done, timeout);
     });
   });
