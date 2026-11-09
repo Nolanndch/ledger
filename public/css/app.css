@@ -222,6 +222,9 @@ button.chip:hover { border-color: currentColor; }
   background: var(--sheet); border: 1px solid var(--rule-2); border-radius: var(--r-sm); padding: 7px 10px; font-size: 13px;
   outline: none; min-width: 0; transition: border-color .15s, box-shadow .15s;
 }
+/* Safari iOS : sans ces règles, un champ date garde sa largeur native et déborde. */
+input.input[type="date"], input.input[type="month"] { -webkit-appearance: none; appearance: none; min-width: 0; text-align: left; }
+input.input::-webkit-date-and-time-value { text-align: left; }
 .input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .search { flex: 1 1 200px; padding-left: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2387928c' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 3.5 3.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 10px center; }
 .table-wrap { overflow-x: auto; }

@@ -30,6 +30,11 @@
 	<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
 	<key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 	<key>UILaunchScreen</key><dict/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key><false/>
+		<key>UISceneConfigurations</key><dict/>
+	</dict>
 	<key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key><true/>
 	<key>UISupportedInterfaceOrientations</key>

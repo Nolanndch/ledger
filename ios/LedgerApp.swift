@@ -7,21 +7,39 @@ import WebKit
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-
-    func application(_ app: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        window = UIWindow(frame: UIScreen.main.bounds)
-        window?.rootViewController = LedgerViewController()
-        window?.makeKeyAndVisible()
-        return true
-    }
-
-    func applicationDidEnterBackground(_ app: UIApplication) {
-        var task: UIBackgroundTaskIdentifier = .invalid
-        task = app.beginBackgroundTask { app.endBackgroundTask(task) }
-        (window?.rootViewController as? LedgerViewController)?.flush { app.endBackgroundTask(task) }
+    func application(_ app: UIApplication, configurationForConnecting session: UISceneSession, options _: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let config = UISceneConfiguration(name: nil, sessionRole: session.role)
+        config.delegateClass = SceneDelegate.self
+        return config
     }
 }
+
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene, willConnectTo _: UISceneSession, options _: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        window = UIWindow(windowScene: scene)
+        window?.rootViewController = LedgerViewController()
+        window?.makeKeyAndVisible()
+    }
+
+    // En arrière-plan : la base est enregistrée tout de suite, avec un peu de temps accordé par iOS.
+    func sceneDidEnterBackground(_: UIScene) {
+        let app = UIApplication.shared
+        let task = Box(UIBackgroundTaskIdentifier.invalid)
+        task.value = app.beginBackgroundTask { app.endBackgroundTask(task.value) }
+        (window?.rootViewController as? LedgerViewController)?.flush { app.endBackgroundTask(task.value) }
+    }
+}
+
+#if DEBUG
+final class ConsoleLog: NSObject, WKScriptMessageHandler {
+    func userContentController(_: WKUserContentController, didReceive m: WKScriptMessage) { NSLog("[page] %@", "\(m.body)") }
+}
+#endif
+
+final class Box<T> { var value: T; init(_ v: T) { value = v } }
 
 final class LedgerViewController: UIViewController, WKUIDelegate, WKNavigationDelegate {
     private var web: WKWebView!
@@ -41,6 +59,14 @@ final class LedgerViewController: UIViewController, WKUIDelegate, WKNavigationDe
     override func loadView() {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(AssetHandler(), forURLScheme: "ledger")
+        #if DEBUG // erreurs et console de la page dans le journal (xcrun simctl spawn booted log stream)
+        config.userContentController.add(ConsoleLog(), name: "log")
+        config.userContentController.addUserScript(WKUserScript(source: """
+            for (const k of ["log", "warn", "error"]) { const o = console[k]; console[k] = (...a) => { try { webkit.messageHandlers.log.postMessage(k + ": " + a.map(String).join(" ")); } catch {} o(...a); }; }
+            addEventListener("error", (e) => webkit.messageHandlers.log.postMessage("error: " + e.message + " @ " + e.filename + ":" + e.lineno));
+            addEventListener("unhandledrejection", (e) => webkit.messageHandlers.log.postMessage("rejection: " + (e.reason && e.reason.stack || e.reason)));
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #endif
         config.applicationNameForUserAgent = "LedgerIOS/\(Self.version)" // reconnu par l'interface
         web = WKWebView(frame: .zero, configuration: config)
         web.uiDelegate = self
@@ -54,6 +80,14 @@ final class LedgerViewController: UIViewController, WKUIDelegate, WKNavigationDe
         #endif
         view = web
     }
+
+    #if DEBUG
+    // LEDGER_SELFTEST=1 : cherche le Mac au démarrage et écrit le résultat dans le journal.
+    func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
+        guard ProcessInfo.processInfo.environment["LEDGER_SELFTEST"] != nil else { return }
+        w.evaluateJavaScript("fetch('/api/sync/discover').then(r => r.text()).then(t => { console.log('discover ' + t); const h = JSON.parse(t)[0]; return h && fetch(h.url + '/sync', { method: 'POST', body: 'x' }).then(async r => console.log('http ' + r.status + ' ' + await r.text())); }).catch(e => console.error('selftest ' + e))")
+    }
+    #endif
 
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
 
@@ -230,7 +264,7 @@ final class LedgerViewController: UIViewController, WKUIDelegate, WKNavigationDe
         }
     }
 
-    /// Adresses IPv4 du Wi-Fi (en dehors de la nôtre), plus les adresses de diffusion au cas où elles passent.
+    /// Adresses IPv4 du Wi-Fi, plus les adresses de diffusion au cas où elles passent.
     private static func localTargets() -> [UInt32] {
         var targets: [UInt32] = [0xFFFF_FFFF]
         var list: UnsafeMutablePointer<ifaddrs>?
@@ -246,7 +280,7 @@ final class LedgerViewController: UIViewController, WKUIDelegate, WKNavigationDe
             if mask < 0xFFFF_FC00 { mask = 0xFFFF_FF00 } // grand réseau : on se limite aux 254 voisins
             let net = ip & mask, bcast = net | ~mask
             targets.append(bcast)
-            if net + 1 < bcast { for host in (net + 1) ..< bcast where host != ip { targets.append(host) } }
+            if net + 1 < bcast { for host in (net + 1) ..< bcast { targets.append(host) } }
         }
         return targets
     }
