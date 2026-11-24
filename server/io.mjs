@@ -103,7 +103,7 @@ function importV4(data, conn, errors) {
   });
   (data.accounts || []).forEach((a, i) => {
     if (!ACCOUNT_TYPES[a.type]) { errors.push(`Compte n°${i + 1} : type inconnu.`); return; }
-    insertRow(conn, "inv_accounts", { id: a.id, name: a.name, type: a.type, broker: a.broker || "", fiscal_date: a.fiscalDate || null, ceiling_cents: a.ceilingCents ?? null, initial_contributions_cents: a.initialContributionsCents || 0, domain_id: dom.has(a.domainId) ? a.domainId : null, closed_on: a.closedOn || null, position: a.position || 0, created_at: a.createdAt || "2000-01-01" });
+    insertRow(conn, "inv_accounts", { id: a.id, name: a.name, type: a.type, tracking: a.tracking === "value" ? "value" : "detail", broker: a.broker || "", fiscal_date: a.fiscalDate || null, ceiling_cents: a.ceilingCents ?? null, initial_contributions_cents: a.initialContributionsCents || 0, domain_id: dom.has(a.domainId) ? a.domainId : null, closed_on: a.closedOn || null, position: a.position || 0, created_at: a.createdAt || "2000-01-01" });
   });
   (data.operations || []).forEach((o, i) => {
     if (!acc.has(o.accountId) || !OP_TYPES[o.type] || !isDate(o.date)) { errors.push(`Opération n°${i + 1} : invalide.`); return; }

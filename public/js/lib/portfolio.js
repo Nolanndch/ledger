@@ -15,10 +15,16 @@ export const ACCOUNT_TYPES = {
 export const OP_TYPES = {
   initial: "Reprise", deposit: "Versement", withdrawal: "Retrait", buy: "Achat", sell: "Vente",
   dividend: "Dividende", interest: "Intérêts", fee: "Frais", tax: "Impôt", trade: "Trade clôturé", split: "Division",
+  valuation: "Valeur",
 };
 
-// Ordre d'application au sein d'une même journée : les achats avant les ventes, les versements avant tout.
-const RANK = { initial: 0, deposit: 1, buy: 2, split: 3, dividend: 4, interest: 4, fee: 4, tax: 4, trade: 4, sell: 5, withdrawal: 6 };
+// Suivi d'un compte : « detail » (positions et cours) ou « value » (valeur globale relevée de temps en temps).
+export const TRACKING = { detail: "Détaillé", value: "Valeur seule" };
+export const VALUE_OPS = new Set(["valuation", "deposit", "withdrawal"]);
+
+// Ordre d'application au sein d'une même journée : les achats avant les ventes, les versements avant tout,
+// le relevé de valeur en dernier (photo de fin de journée).
+const RANK = { initial: 0, deposit: 1, buy: 2, split: 3, dividend: 4, interest: 4, fee: 4, tax: 4, trade: 4, sell: 5, withdrawal: 6, valuation: 7 };
 export const sortOps = (ops) => [...ops].sort((a, b) =>
   a.date.localeCompare(b.date) || (RANK[a.type] - RANK[b.type]) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.id).localeCompare(String(b.id)));
 
@@ -32,6 +38,7 @@ export class PortfolioError extends Error {
 // Rejoue les opérations d'un compte. `ops` : {id, date, type, asset, qty, price, feesCents, amountCents, side, ratio, createdAt}.
 // Lève PortfolioError si une vente dépasse la quantité détenue, ou si les liquidités d'un PEA deviennent négatives.
 export function replay(account, ops, { strict = true } = {}) {
+  if (account.tracking === "value") return replayValue(account, ops);
   const type = ACCOUNT_TYPES[account.type] || ACCOUNT_TYPES.autre;
   const st = {
     cash: 0, deposits: 0, withdrawals: 0, income: 0, withholding: 0, fees: 0, taxes: 0, realized: 0,
@@ -90,6 +97,7 @@ export function replay(account, ops, { strict = true } = {}) {
         st.events.push({ date: op.date, asset: op.asset, qty: n, pnl: amt, opId: op.id, trade: true });
         break;
       case "split": { const p = pos(op.asset); if (op.ratio > 0) p.qty *= op.ratio; break; }
+      // valuation : ignorée en suivi détaillé (relevés gardés d'une période en « valeur seule »)
     }
     if (type.cashFloor && st.cash < -0.5) {
       const msg = `Le ${op.date}, les liquidités du compte deviendraient négatives (${(st.cash / 100).toFixed(2).replace(".", ",")} €). Ajoute d'abord un versement.`;
@@ -106,8 +114,37 @@ export function replay(account, ops, { strict = true } = {}) {
   };
 }
 
+// Compte suivi par sa valeur : dernier relevé, plus les versements et moins les retraits qui le suivent.
+// Sans relevé, la valeur est estimée au versé net. Les autres opérations (historique d'une période en suivi
+// détaillé) restent consultables mais n'entrent pas dans le calcul. `cash` porte la valeur : une clôture la retire.
+function replayValue(account, ops) {
+  let val = 0, deposits = 0, withdrawals = 0, firstDeposit = null, lastDate = null, valuedOn = null;
+  const warnings = [];
+  for (const op of sortOps(ops)) {
+    const amt = Math.round(op.amountCents || 0);
+    lastDate = op.date;
+    if (op.type === "valuation") { val = amt; valuedOn = op.date; }
+    else if (op.type === "deposit") { val += amt; deposits += amt; if (!firstDeposit) firstDeposit = op.date; }
+    else if (op.type === "withdrawal") {
+      val -= amt; withdrawals += amt;
+      if (valuedOn && val < -0.5) warnings.push(`Le ${op.date}, le retrait dépasse la dernière valeur relevée : mets à jour la valeur du compte.`);
+    }
+  }
+  const initialContrib = Math.round(account.initialContributionsCents || 0);
+  const contributions = initialContrib + deposits - withdrawals;
+  return {
+    tracking: "value", cash: valuedOn ? val : contributions, valuedOn, estimated: !valuedOn,
+    deposits, withdrawals, income: 0, withholding: 0, fees: 0, taxes: 0, realized: 0,
+    positions: [], events: [], trades: [], firstDeposit, lastDate, warnings,
+    contributions, grossContributions: initialContrib + deposits,
+  };
+}
+
 // Valorisation avec les cours connus (centimes). `prices` : {SYMBOLE: prix en euros}.
 export function value(result, prices = {}) {
+  if (result.tracking === "value") {
+    return { positions: [], invested: 0, market: 0, cash: 0, total: result.cash, unrealized: 0, gain: result.cash - result.contributions, valuedOn: result.valuedOn, estimated: result.estimated };
+  }
   let invested = 0, market = 0;
   const positions = result.positions.filter((p) => p.qty > EPS).map((p) => {
     const known = prices[p.asset];

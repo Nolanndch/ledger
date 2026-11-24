@@ -481,6 +481,7 @@ tr.transfer td { color: var(--ink-2); }
 
 /* investissements */
 .account-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.account-chips, .account-actions { display: contents; }
 .account-chip { display: grid; gap: 1px; text-align: left; padding: 7px 12px; border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--sheet); font-size: 13px; }
 .account-chip small { font-size: 11.5px; color: var(--ink-3); }
 .account-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -524,6 +525,27 @@ tr.transfer td { color: var(--ink-2); }
   .row-actions .btn, .row .amt .faint { display: none; }
   .row { flex-wrap: nowrap; }
   .account-chip { padding: 6px 10px; }
+  /* comptes sur une ligne qui défile, actions en dessous */
+  .account-bar { display: grid; gap: 10px; }
+  .account-bar > .spacer { display: none; }
+  .account-chips { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; margin-inline: -16px; padding-inline: 16px; scrollbar-width: none; }
+  .account-chips::-webkit-scrollbar { display: none; }
+  .account-chips > * { flex: none; scroll-snap-align: start; white-space: nowrap; }
+  .account-actions { display: flex; gap: 8px; }
+  .account-actions .btn { flex: 1 1 auto; justify-content: center; }
+  /* positions : nom de l'actif sur une ligne, pourcentage sous le montant */
+  table.positions .meta { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.positions td.amt .faint { display: block; }
+  /* business dans les réglages : nom en pleine largeur, actions à la ligne */
+  .edit-row:has(.opening) { flex-wrap: wrap; row-gap: 6px; }
+  .edit-row:has(.opening) { column-gap: 6px; }
+  .edit-row:has(.opening) .input { flex: 1 1 calc(100% - 82px); min-width: 0; }
+  .edit-row:has(.opening) > :not(.swatch, .input, .del) { order: 2; }
+  .edit-row:has(.opening) .del { order: 1; }
+  .edit-row:has(.opening) .opening { margin-right: auto; }
+  /* fiches : libellé au-dessus de la valeur */
+  dl.facts { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+  dl.facts dd { margin-bottom: 8px; }
 }
 /* les grilles ne doivent jamais s'élargir au-delà de la fenêtre (tableaux, montants sans retour à la ligne) */
 .content, .view, #invContent, #subContent { grid-template-columns: minmax(0, 1fr); }
@@ -572,7 +594,6 @@ tr.transfer td { color: var(--ink-2); }
   .filters .select { flex: 1 1 40%; }
   .btn-row .btn { white-space: normal; text-align: left; }
   .filters .select { font-size: 14px; }
-  table.positions td.amt .faint { display: none; }
 
   /* boîtes de dialogue en feuille montant du bas */
   dialog, dialog.wide {
@@ -595,4 +616,6 @@ tr.transfer td { color: var(--ink-2); }
   .input:not(.amount-input), .select { padding: 9px 10px; font-size: 16px; }
   .input.search { padding-left: 34px; }
   .btn.small { padding: 7px 12px; }
+  button.tag { min-height: 32px; }
+  .chip:is(button) { min-height: 30px; padding-inline: 10px; }
 }

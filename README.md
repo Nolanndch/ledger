@@ -21,7 +21,7 @@ Tout reste chez toi. Les données sont dans une base SQLite sur ton ordinateur o
 - **Suivre la trésorerie** de chaque business : entrées, sorties, résultat, ce qui reste à encaisser, et ce qui arrive bientôt (retards, échéances, prélèvements).
 - **Saisir des paiements** uniques, récurrents ou en plusieurs fois (un acompte puis le solde, par exemple). Les échéances futures restent « en attente » jusqu'à ce qu'elles soient payées.
 - **Suivre les abonnements**, dans les deux sens : le revenu récurrent d'un SaaS (MRR, résiliations, essais gratuits) et tes propres charges fixes.
-- **Gérer des placements** : PEA, compte-titres, crypto. Prix de revient, plus-values, plafond et ancienneté du PEA, et un journal de trading avec ses statistiques.
+- **Gérer des placements** : PEA, compte-titres, crypto. Prix de revient, plus-values, plafond et ancienneté du PEA, et un journal de trading avec ses statistiques. Un compte peut aussi se suivre par sa seule valeur : les versements, et le total affiché par le courtier une fois par mois.
 - **Se fixer des objectifs** et voir le rythme mensuel à tenir.
 - **Analyser** : meilleurs clients, principaux fournisseurs, rentabilité par business.
 

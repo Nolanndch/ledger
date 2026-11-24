@@ -1,6 +1,6 @@
 // Vue Investissements : comptes (PEA, compte-titres, crypto…), positions, PEA, trading, opérations, cours.
 import { $, $$, esc, fmt, fmtExact, fmtCents, fmtSignedCents, fmtQty, fmtPct, fmtDate, todayISO, relTime, S, store, api, refresh, mutate, toast, choiceBox, formBox, fillSelects, segVal, setSeg, onClick, onChange, registerView, render, saveSettings, domainById, accountResult, priceMap, ICON } from "../core.js";
-import { ACCOUNT_TYPES, OP_TYPES, replay, value as valuate, tradingStats, peaStatus } from "../lib/portfolio.js";
+import { ACCOUNT_TYPES, OP_TYPES, TRACKING, VALUE_OPS, replay, value as valuate, tradingStats, peaStatus } from "../lib/portfolio.js";
 
 const root = $("#view-investments");
 root.innerHTML = `
@@ -15,7 +15,15 @@ const CLASSES = { action: "Actions", etf: "ETF", crypto: "Crypto", obligation: "
 const accById = (id) => S.accounts.find((a) => a.id === id);
 const selectedAccounts = () => selected === "all" ? S.accounts.filter((a) => !a.closedOn) : S.accounts.filter((a) => a.id === selected);
 const OP_DONE = { ...OP_TYPES, trade: "Trade" };
-const FEM = new Set(["sell", "split", "initial"]), PLURAL = new Set(["interest", "fee"]);
+const FEM = new Set(["sell", "split", "initial", "valuation"]), PLURAL = new Set(["interest", "fee"]);
+const isValue = (a) => a?.tracking === "value";
+const STALE_DAYS = 35;
+// Fraîcheur de la valeur d'un compte suivi en valeur seule
+function freshness(r) {
+  const on = r.v.valuedOn;
+  const days = on ? Math.round((Date.parse(t0()) - Date.parse(on)) / 864e5) : null;
+  return { on, stale: !on || days > STALE_DAYS, label: on ? `relevée le ${fmtDate(on)}` : "estimée au versé, aucun relevé" };
+}
 const signedOp = (o) => ({ deposit: 1, withdrawal: -1, buy: -1, sell: 1, dividend: 1, interest: 1, fee: -1, tax: -1, trade: 1, initial: 1, split: 0 }[o.type] || 0) * o.amountCents;
 
 function renderBar() {
@@ -23,21 +31,30 @@ function renderBar() {
   const open = S.accounts.filter((a) => !a.closedOn), closed = S.accounts.filter((a) => a.closedOn);
   if (selected !== "all" && !accById(selected)) selected = "all";
   const chip = (id, label, sub, active) => `<button class="account-chip" data-inv-account="${id}" aria-pressed="${active}"><span>${label}</span>${sub ? `<small class="num">${sub}</small>` : ""}</button>`;
-  $("#accountBar").innerHTML = [
+  $("#accountBar").innerHTML = `<div class="account-chips">${[
     open.length > 1 ? chip("all", "Tous les comptes", "", selected === "all") : "",
     ...open.map((a) => chip(a.id, `${esc(a.name)} <span class="faint">${ACCOUNT_TYPES[a.type].label === a.name ? "" : ACCOUNT_TYPES[a.type].label}</span>`, fmtCents(accountResult(a, prices).v.total), selected === a.id || (open.length === 1 && selected === "all"))),
     showClosed ? closed.map((a) => chip(a.id, `${esc(a.name)} <span class="faint">clôturé</span>`, "", selected === a.id)).join("") : "",
     closed.length ? `<button class="link-btn" id="toggleClosed">${showClosed ? "Masquer" : "Voir"} les clôturés (${closed.length})</button>` : "",
-    `<span class="spacer"></span>`,
-    S.accounts.length ? `<button class="btn small" id="pricesBtn">Mettre à jour les cours</button><button class="btn small primary" id="addOpBtn">${ICON.plus.replace("<svg", '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4"')} Opération</button>` : "",
-    `<button class="btn small" id="addAccBtn">Nouveau compte</button>`,
+  ].join("")}</div><span class="spacer"></span><div class="account-actions">${S.accounts.length ? actionButtons(open) : ""}<button class="btn small" id="addAccBtn">${short("Nouveau compte", "+ Compte")}</button></div>`;
+}
+
+// Libellé complet sur grand écran, court sur téléphone
+const short = (long, sm) => `<span class="hide-sm">${long}</span><span class="show-sm">${sm}</span>`;
+function actionButtons(open) {
+  const valueFirst = selected === "all" ? open.length && open.every(isValue) : isValue(accById(selected));
+  const plus = ICON.plus.replace("<svg", '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4"');
+  return [
+    open.some((a) => !isValue(a)) ? `<button class="btn small" id="pricesBtn">${short("Mettre à jour les cours", "Cours")}</button>` : "",
+    open.some(isValue) ? `<button class="btn small${valueFirst ? " primary" : ""}" id="valueBtn">${short("Mettre à jour la valeur", "Valeur")}</button>` : "",
+    `<button class="btn small${valueFirst ? "" : " primary"}" id="addOpBtn">${plus} Opération</button>`,
   ].join("");
 }
 
 function emptyState() {
   $("#invContent").innerHTML = `<div class="panel empty-hero">
     <h2>Suis tes placements</h2>
-    <p class="muted">Crée un compte par enveloppe : ton PEA, ton compte-titres de trading, ton portefeuille crypto. Tu peux reprendre un compte existant avec ses positions actuelles sans ressaisir tout l'historique.</p>
+    <p class="muted">Crée un compte par enveloppe : ton PEA, ton compte-titres de trading, ton portefeuille crypto. Pour un PEA, le suivi « valeur seule » suffit : tes versements, et la valeur affichée par ton courtier une fois par mois.</p>
     <div class="btn-row" style="justify-content:center">
       <button class="btn primary" data-new-account="pea">Ajouter un PEA</button><button class="btn" data-new-account="cto">Compte-titres / trading</button><button class="btn" data-new-account="crypto">Crypto</button>
     </div>
@@ -48,13 +65,13 @@ function positionsTable(rows, groupByAsset) {
   const hideAcc = groupByAsset || selected !== "all";
   if (!rows.length) return `<div class="empty">Aucune position ouverte.</div>`;
   return `<div class="table-wrap"><table class="positions"><thead><tr>
-    <th>Actif</th>${hideAcc ? "" : `<th class="hide-sm">Compte</th>`}<th class="r">Quantité</th><th class="r hide-sm" title="Prix de revient unitaire : prix moyen payé par titre, frais inclus">PRU</th><th class="r hide-sm">Cours</th><th class="r">Valeur</th><th class="r">Plus-value latente</th></tr></thead>
+    <th>Actif</th>${hideAcc ? "" : `<th class="hide-sm">Compte</th>`}<th class="r hide-sm">Quantité</th><th class="r hide-sm" title="Prix de revient unitaire : prix moyen payé par titre, frais inclus">PRU</th><th class="r hide-sm">Cours</th><th class="r">Valeur</th><th class="r">${short("Plus-value latente", "Latent")}</th></tr></thead>
     <tbody>${rows.map((p) => {
       const asset = S.assets.find((a) => a.symbol === p.asset);
       const pct = p.cost ? p.unrealized / p.cost : null;
       return `<tr><td><b>${esc(p.asset)}</b>${asset?.name ? `<div class="meta">${esc(asset.name)}</div>` : ""}</td>
         ${hideAcc ? "" : `<td class="hide-sm muted">${esc(p.accountName)}</td>`}
-        <td class="r num">${fmtQty(p.qty)}</td><td class="r num hide-sm">${fmtExact(p.avg)}</td>
+        <td class="r num hide-sm">${fmtQty(p.qty)}</td><td class="r num hide-sm">${fmtExact(p.avg)}</td>
         <td class="r num hide-sm">${p.estimated ? `<span class="faint" title="Cours non renseigné : dernier prix d'achat ou de vente">${fmtExact(p.price)}*</span>` : fmtExact(p.price)}</td>
         <td class="r amt">${fmtCents(p.marketValue)}</td>
         <td class="r amt ${p.unrealized >= 0 ? "up" : "down"}">${fmtSignedCents(p.unrealized)} <span class="faint">${fmtPct(pct)}</span></td></tr>`;
@@ -113,6 +130,7 @@ function opsPanel(accounts) {
     if (o.type === "trade") return `${o.side === "short" ? "short" : "long"}${o.qty ? ` · ${fmtQty(o.qty)}` : ""}`;
     if (o.type === "initial") return o.asset ? `${fmtQty(o.qty)} repris` : "liquidités reprises";
     if ((o.type === "deposit" || o.type === "withdrawal") && linked.has(o.id)) return "relié à la trésorerie";
+    if (o.type === "valuation") return "valeur totale du compte";
     return "";
   };
   return `<div class="panel"><div class="panel-head"><h2>Opérations</h2><span class="spacer"></span>
@@ -122,8 +140,8 @@ function opsPanel(accounts) {
       const v = signedOp(o);
       return `<div class="row clickable" data-op-edit="${o.id}"><span class="date-pill">${fmtDate(o.date).slice(0, 6)}<small>${o.date.slice(0, 4)}</small></span>
         <div class="grow"><div class="title">${OP_TYPES[o.type]}${o.asset ? ` · <b>${esc(o.asset)}</b>` : ""}${selected === "all" ? ` <span class="faint">${esc(accById(o.accountId)?.name || "")}</span>` : ""}</div><div class="sub">${detail(o)}${o.notes ? ` · ${esc(o.notes)}` : ""}</div></div>
-        <span class="amt ${v > 0 ? "up" : v < 0 ? "down" : "faint"}">${o.type === "split" ? "" : (v > 0 ? "+" : v < 0 ? "−" : "") + fmtCents(Math.abs(o.amountCents))}</span>
-        <button class="icon-btn del" data-op-del="${o.id}" aria-label="Supprimer">${ICON.del}</button></div>`;
+        <span class="amt ${v > 0 ? "up" : v < 0 ? "down" : o.type === "valuation" ? "" : "faint"}">${o.type === "split" ? "" : (v > 0 ? "+" : v < 0 ? "−" : "") + fmtCents(Math.abs(o.amountCents))}</span>
+        <button class="icon-btn del hide-sm" data-op-del="${o.id}" aria-label="Supprimer">${ICON.del}</button></div>`;
     }).join("") || `<div class="empty">Aucune opération${opFilter.type !== "all" || opFilter.asset !== "all" ? " avec ces filtres" : ""}.</div>`}</div>
     ${ops.length > shown.length ? `<p class="hint" style="padding:8px 18px">200 opérations les plus récentes affichées sur ${ops.length}.</p>` : ""}</div>`;
 }
@@ -160,29 +178,39 @@ function renderInvestments() {
   const alloc = [...byClass.entries()].sort((a, b) => b[1] - a[1]);
   const allocTotal = alloc.reduce((a, [, v]) => a + v, 0) || 1;
   const perf = contrib > 0 ? gain / contrib : null;
+  const valued = results.filter((r) => isValue(r.account)), detailed = results.length - valued.length;
+  if (valued.length && detailed) byClass.set("value", valued.reduce((x, r) => x + r.v.total, 0));
+  const oldest = valued.map((r) => ({ r, f: freshness(r) })).sort((a, b) => (a.f.on || "").localeCompare(b.f.on || ""))[0];
+  const updateLink = (r, label) => `<button class="link-btn" data-value-update="${r.account.id}">${label}</button>`;
+  const valueSub = !detailed && valued.length === 1
+    ? `${oldest.f.label}${oldest.f.stale ? ` · ${updateLink(oldest.r, "à mettre à jour")}` : ""}`
+    : `dont ${fmtCents(cash)} de liquidités${valued.length ? ` · ${valued.length} compte${valued.length > 1 ? "s" : ""} en valeur seule` : ""}`;
+  const detailTile = detailed || !valued.length
+    ? `<div><div class="kpi-label">Détail</div><div class="kpi-sub stack"><span>Réalisé <b class="num ${realized >= 0 ? "up" : "down"}">${fmtSignedCents(realized)}</b></span><span>Latent <b class="num ${unreal >= 0 ? "up" : "down"}">${fmtSignedCents(unreal)}</b></span><span>Dividendes et intérêts <b class="num">${fmtCents(income)}</b></span><span>Frais et impôts <b class="num">${fmtCents(fees)}</b></span></div></div>`
+    : `<div><div class="kpi-label">Dernier relevé</div><div class="kpi-value">${oldest.f.on ? fmtDate(oldest.f.on) : "—"}</div><div class="kpi-sub">${updateLink(oldest.r, "Mettre à jour la valeur")}</div></div>`;
 
   $("#invContent").innerHTML = `
     ${warnings.length ? `<div class="banner">${warnings.map(esc).join("<br>")}</div>` : ""}
     <div class="summary-strip four">
-      <div><div class="kpi-label">Valeur</div><div class="kpi-value">${fmtCents(total)}</div><div class="kpi-sub">dont ${fmtCents(cash)} de liquidités</div></div>
+      <div><div class="kpi-label">Valeur</div><div class="kpi-value">${fmtCents(total)}</div><div class="kpi-sub">${valueSub}</div></div>
       <div><div class="kpi-label" title="Versements moins retraits, versements antérieurs inclus">Versé net</div><div class="kpi-value">${fmtCents(contrib)}</div><div class="kpi-sub">depuis l'ouverture</div></div>
       <div><div class="kpi-label">Plus-value totale</div><div class="kpi-value ${gain >= 0 ? "up" : "down"}">${fmtSignedCents(gain)}</div><div class="kpi-sub">${perf != null ? `${fmtPct(perf)} sur le versé` : "—"}</div></div>
-      <div><div class="kpi-label">Détail</div><div class="kpi-sub stack"><span>Réalisé <b class="num ${realized >= 0 ? "up" : "down"}">${fmtSignedCents(realized)}</b></span><span>Latent <b class="num ${unreal >= 0 ? "up" : "down"}">${fmtSignedCents(unreal)}</b></span><span>Dividendes et intérêts <b class="num">${fmtCents(income)}</b></span><span>Frais et impôts <b class="num">${fmtCents(fees)}</b></span></div></div>
+      ${detailTile}
     </div>
-    <div class="panel"><div class="panel-head"><h2>Positions</h2><span class="spacer"></span>
+    ${detailed ? `<div class="panel"><div class="panel-head"><h2>Positions</h2><span class="spacer"></span>
       <div class="seg small" id="invGroup"><button data-v="account">Par compte</button><button data-v="asset">Par actif</button></div>
       ${closedPos.length ? `<label class="check small"><input type="checkbox" id="showClosedPos"${S.settings?.hideClosedPositions === false ? " checked" : ""}>Positions soldées</label>` : ""}</div>
       ${positionsTable(rows, group === "asset")}
       ${closedPos.length && S.settings?.hideClosedPositions === false ? `<div class="rows closed-pos">${closedPos.map((p) => `<div class="row"><div class="grow"><div class="title">${esc(p.asset)} <span class="faint">soldée</span></div><div class="sub">${esc(p.accountName)}</div></div><span class="amt ${p.realized >= 0 ? "up" : "down"}">${fmtSignedCents(p.realized)}</span></div>`).join("")}</div>` : ""}
-    </div>
+    </div>` : ""}
     <div class="grid-2 even">${results.map((r) => peaCard(r.account, r.r)).join("")}</div>
     ${tradingCard(trades)}
     <div class="grid-2">
       ${opsPanel(accounts)}
       <div style="display:grid;gap:20px;align-content:start">
-        <div class="panel"><div class="panel-head"><h2>Répartition</h2></div><div class="panel-body">
-          ${alloc.map(([k, v]) => `<div class="bar-row"><div class="name"><span>${k === "cash" ? "Liquidités" : CLASSES[k] || "Autres"}</span></div><div class="bar-track"><div class="bar-fill" style="width:${(v / allocTotal) * 100}%;background:var(--accent)"></div></div><div class="val">${Math.round((v / allocTotal) * 100)} %</div></div>`).join("") || `<div class="empty">—</div>`}
-        </div></div>
+        ${detailed ? `<div class="panel"><div class="panel-head"><h2>Répartition</h2></div><div class="panel-body">
+          ${alloc.map(([k, v]) => `<div class="bar-row"><div class="name"><span>${k === "cash" ? "Liquidités" : k === "value" ? "Suivi en valeur" : CLASSES[k] || "Autres"}</span></div><div class="bar-track"><div class="bar-fill" style="width:${(v / allocTotal) * 100}%;background:var(--accent)"></div></div><div class="val">${Math.round((v / allocTotal) * 100)} %</div></div>`).join("") || `<div class="empty">—</div>`}
+        </div></div>` : ""}
         ${results.length === 1 ? accountFacts(results[0]) : `<div class="panel"><div class="panel-head"><h2>Par compte</h2></div><div class="rows">${results.map((r) => `<button class="row clickable" data-inv-account="${r.account.id}"><div class="grow"><div class="title">${esc(r.account.name)}</div><div class="sub">versé ${fmtCents(r.r.contributions)}</div></div><span class="amt">${fmtCents(r.v.total)}</span><span class="num ${r.v.gain >= 0 ? "up" : "down"}" style="font-size:12px">${fmtSignedCents(r.v.gain)}</span></button>`).join("")}</div></div>`}
       </div>
     </div>`;
@@ -193,16 +221,18 @@ function accountFacts({ account: a }) {
   const d = domainById(a.domainId);
   return `<div class="panel"><div class="panel-head"><h2>Compte</h2><span class="spacer"></span><button class="btn small" data-acc-edit="${a.id}">Modifier</button></div>
     <div class="panel-body" style="display:grid;gap:14px"><dl class="facts">
-      <dt>Type</dt><dd>${ACCOUNT_TYPES[a.type].label}</dd>${a.broker ? `<dt>Courtier</dt><dd>${esc(a.broker)}</dd>` : ""}
+      <dt>Type</dt><dd>${ACCOUNT_TYPES[a.type].label}</dd><dt>Suivi</dt><dd>${TRACKING[a.tracking] || TRACKING.detail}</dd>${a.broker ? `<dt>Courtier</dt><dd>${esc(a.broker)}</dd>` : ""}
       <dt>Virements</dt><dd>${d ? esc(d.name) : "Perso"}</dd>${a.closedOn ? `<dt>Clôturé le</dt><dd>${fmtDate(a.closedOn)}</dd>` : ""}</dl>
       <div class="btn-row">${a.closedOn ? `<button class="btn small" data-acc-reopen="${a.id}">Rouvrir</button>` : `<button class="btn small" data-acc-close="${a.id}">Clôturer</button>`}<button class="btn small danger" data-acc-del="${a.id}">Supprimer</button></div></div></div>`;
 }
 
 root.addEventListener("click", (e) => {
   if (e.target.id === "toggleClosed") { showClosed = !showClosed; renderInvestments(); }
-  if (e.target.id === "addAccBtn") openAccount();
-  if (e.target.id === "addOpBtn") openOperation(null, { accountId: selected !== "all" ? selected : undefined });
-  if (e.target.id === "pricesBtn") openPrices();
+  const id = e.target.closest("button")?.id;
+  if (id === "addAccBtn") openAccount();
+  if (id === "addOpBtn") openOperation(null, { accountId: selected !== "all" ? selected : undefined });
+  if (id === "pricesBtn") openPrices();
+  if (id === "valueBtn") openValue(isValue(accById(selected)) ? selected : S.accounts.find((a) => !a.closedOn && isValue(a))?.id);
   const g = e.target.closest("#invGroup button");
   if (g) saveSettings({ investGroup: g.dataset.v });
 });
@@ -213,6 +243,8 @@ root.addEventListener("change", (e) => {
 });
 onClick("invAccount", (id) => { selected = id; store.set("invAccount", id); opFilter = { type: "all", asset: "all" }; renderInvestments(); });
 onClick("newAccount", (type) => openAccount(null, type));
+onClick("valueUpdate", (id) => openValue(id));
+const openValue = (accountId) => openOperation(null, { accountId, type: "valuation" });
 
 // ---------- dialogue compte ----------
 const accDialog = document.createElement("dialog");
@@ -220,6 +252,8 @@ accDialog.className = "wide";
 accDialog.innerHTML = `<form id="accForm" novalidate>
   <h3 id="accTitle">Nouveau compte</h3>
   <div class="seg wrap pick" id="accType">${Object.entries(ACCOUNT_TYPES).map(([k, v]) => `<button type="button" data-v="${k}">${v.label}</button>`).join("")}</div>
+  <div class="field"><span class="label">Suivi</span><div class="seg pick" id="accTracking"><button type="button" data-v="value">${TRACKING.value}</button><button type="button" data-v="detail">${TRACKING.detail}</button></div><span class="hint" id="accTrackingHint"></span></div>
+  <div class="field" id="accValueField"><label for="accValueNow">Valeur actuelle du compte (€)</label><input class="input num" id="accValueNow" type="number" step="0.01" min="0" inputmode="decimal"><span class="hint">Le total affiché par ton courtier, liquidités comprises.</span></div>
   <div class="fields-2">
     <div class="field"><label for="accBroker">Courtier</label><input class="input" id="accBroker" placeholder="Ex. Boursorama, Trade Republic, Binance" autocomplete="off"></div>
     <div class="field"><label for="accName">Nom</label><input class="input" id="accName" autocomplete="off"></div>
@@ -233,19 +267,27 @@ accDialog.innerHTML = `<form id="accForm" novalidate>
     <p class="hint">Saisis la situation d'aujourd'hui au lieu de tout l'historique. Ces montants ne touchent pas ta trésorerie.</p>
     <div class="fields-2">
       <div class="field"><label for="accInitContrib">Total déjà versé sur le compte (€)</label><input class="input num" id="accInitContrib" type="number" step="0.01" min="0" placeholder="0"></div>
-      <div class="field"><label for="accInitCash">Liquidités actuelles (€)</label><input class="input num" id="accInitCash" type="number" step="0.01" min="0" placeholder="0"></div>
+      <div class="field" data-detail-only><label for="accInitCash">Liquidités actuelles (€)</label><input class="input num" id="accInitCash" type="number" step="0.01" min="0" placeholder="0"></div>
     </div>
-    <div class="field" id="accPosField"><span class="label">Positions actuelles</span><div id="accPositions"></div><button type="button" class="link-btn" id="accAddPos">+ Ajouter une position</button></div>
+    <div class="field" id="accPosField" data-detail-only><span class="label">Positions actuelles</span><div id="accPositions"></div><button type="button" class="link-btn" id="accAddPos">+ Ajouter une position</button></div>
   </details>
   <div class="form-error" id="accError" hidden></div>
   <div class="dialog-actions"><button type="button" class="btn" data-close>Annuler</button><button class="btn primary">Enregistrer</button></div>
 </form>`;
 document.body.appendChild(accDialog);
-let editingAcc = null, autoName = true;
+let editingAcc = null, autoName = true, trackingTouched = false;
 const accErr = (m) => { $("#accError").textContent = m; $("#accError").hidden = !m; };
 function syncAcc() {
   const type = segVal("accType");
   const pea = type === "pea" || type === "pea_pme";
+  if (!editingAcc && !trackingTouched) setSeg("accTracking", pea ? "value" : "detail");
+  const value = segVal("accTracking") === "value";
+  $("#accTrackingHint").textContent = value
+    ? "Tu saisis tes versements et, quand tu veux, la valeur affichée par ton courtier. Une fois par mois suffit."
+    : "Chaque achat et vente avec les cours : prix de revient, plus-values latentes, journal de trading.";
+  // Valeur de départ : à la création, ou quand un compte détaillé passe en valeur seule
+  $("#accValueField").hidden = !value || isValue(editingAcc);
+  for (const el of $$("[data-detail-only]", accDialog)) el.hidden = value || !!editingAcc;
   $("#accPeaFields").hidden = !pea;
   if (type === "pea_pme") $("#accCeiling").value = "22500000";
   else if (type === "pea" && $("#accCeiling").value === "22500000") $("#accCeiling").value = "15000000";
@@ -255,6 +297,7 @@ function syncAcc() {
 const posRow = (p = {}) => `<div class="schedule-row"><input class="input" placeholder="Actif (ex. CW8)" list="assetList" data-pos="asset" value="${esc(p.asset || "")}"><input class="input num" type="number" step="any" min="0" placeholder="Quantité" data-pos="qty"><input class="input num" type="number" step="any" min="0" placeholder="PRU (€)" data-pos="pru"><button type="button" class="icon-btn del" data-pos-del aria-label="Retirer">${ICON.del}</button></div>`;
 accDialog.addEventListener("click", (e) => {
   if (e.target.closest("#accType button")) setTimeout(syncAcc);
+  if (e.target.closest("#accTracking button")) { trackingTouched = true; setTimeout(syncAcc); }
   if (e.target.id === "accAddPos") $("#accPositions").insertAdjacentHTML("beforeend", posRow());
   if (e.target.closest("[data-pos-del]")) e.target.closest(".schedule-row").remove();
 });
@@ -269,14 +312,15 @@ export function openAccount(a, type = "pea") {
   $("#accBroker").value = a?.broker || "";
   $("#accName").value = a?.name || "";
   autoName = !a;
+  trackingTouched = false;
+  setSeg("accTracking", a?.tracking || "detail");
+  $("#accValueNow").value = a && !isValue(a) ? (accountResult(a).v.total / 100).toFixed(2) : "";
   $("#accFiscal").value = a?.fiscalDate || "";
   $("#accCeiling").value = String(a?.ceilingCents || ((a?.type || type) === "pea_pme" ? 22500000 : 15000000));
   $("#accDomain").value = a?.domainId || "";
   $("#accInitContrib").value = a ? (a.initialContributionsCents / 100 || "") : "";
   $("#accInitCash").value = "";
   $("#accPositions").innerHTML = "";
-  $("#accInitCash").closest(".field").hidden = !!a;
-  $("#accPosField").hidden = !!a;
   $("#accStart").open = !!(a && a.initialContributionsCents);
   accErr("");
   syncAcc();
@@ -290,17 +334,24 @@ $("#accForm").addEventListener("submit", async (e) => {
     type, broker: $("#accBroker").value.trim(), name: $("#accName").value.trim(), domainId: $("#accDomain").value || null,
     fiscalDate: pea ? $("#accFiscal").value || null : null, ceilingCents: pea ? Number($("#accCeiling").value) : null,
     initialContributionsCents: Math.round((parseFloat($("#accInitContrib").value) || 0) * 100),
+    tracking: segVal("accTracking"),
   };
+  const valueNow = $("#accValueField").hidden || $("#accValueNow").value === "" ? null : Math.round(parseFloat($("#accValueNow").value) * 100);
+  if (valueNow != null && !(valueNow >= 0)) return accErr("Valeur actuelle invalide.");
   const positions = $$("#accPositions .schedule-row").map((row) => ({ asset: $("[data-pos=asset]", row).value.trim().toUpperCase(), qty: parseFloat($("[data-pos=qty]", row).value), pru: parseFloat($("[data-pos=pru]", row).value) })).filter((p) => p.asset);
   if (positions.some((p) => !(p.qty > 0) || !(p.pru >= 0))) return accErr("Chaque position reprise doit avoir une quantité et un PRU.");
   try {
     const acc = await api(editingAcc ? "PUT" : "POST", editingAcc ? `accounts/${editingAcc.id}` : "accounts", body);
+    if (valueNow != null) {
+      await api("POST", "operations", { accountId: acc.id, date: t0(), type: "valuation", amountCents: valueNow, notes: editingAcc ? "Passage en valeur seule" : "Reprise du compte" });
+      if (!editingAcc && !body.initialContributionsCents) await api("PUT", `accounts/${acc.id}`, { initialContributionsCents: valueNow });
+    }
     if (!editingAcc) {
       const date = t0();
       const cash = Math.round((parseFloat($("#accInitCash").value) || 0) * 100);
-      if (cash > 0) await api("POST", "operations", { accountId: acc.id, date, type: "initial", amountCents: cash, notes: "Reprise du compte" });
-      for (const p of positions) await api("POST", "operations", { accountId: acc.id, date, type: "initial", asset: p.asset, qty: p.qty, price: p.pru, amountCents: Math.round(p.qty * p.pru * 100), notes: "Reprise du compte" });
-      if (!body.initialContributionsCents && (cash || positions.length)) await api("PUT", `accounts/${acc.id}`, { initialContributionsCents: cash + positions.reduce((a, p) => a + Math.round(p.qty * p.pru * 100), 0) });
+      if (cash > 0 && body.tracking === "detail") await api("POST", "operations", { accountId: acc.id, date, type: "initial", amountCents: cash, notes: "Reprise du compte" });
+      for (const p of body.tracking === "detail" ? positions : []) await api("POST", "operations", { accountId: acc.id, date, type: "initial", asset: p.asset, qty: p.qty, price: p.pru, amountCents: Math.round(p.qty * p.pru * 100), notes: "Reprise du compte" });
+      if (body.tracking === "detail" && !body.initialContributionsCents && (cash || positions.length)) await api("PUT", `accounts/${acc.id}`, { initialContributionsCents: cash + positions.reduce((a, p) => a + Math.round(p.qty * p.pru * 100), 0) });
       selected = acc.id; store.set("invAccount", acc.id);
     }
     accDialog.close(); await refresh();
@@ -311,11 +362,12 @@ onClick("accEdit", (id) => openAccount(accById(id)));
 async function closeAcc(id) {
   const a = accById(id);
   const r = accountResult(a);
+  const left = isValue(a) ? r.v.total : r.v.cash;
   if (r.v.positions.length) return toast(`Il reste des titres sur ce compte (${r.v.positions.map((p) => p.asset).join(", ")}). Enregistre d'abord leur vente.`, null, true);
   const v = await formBox(`Clôturer « ${a.name} » ?`, `
-    <p class="muted" style="margin:0;font-size:13px">${r.v.cash > 0 ? `Les ${fmtCents(r.v.cash)} de liquidités seront retirés du compte.` : "Le compte n'a plus de liquidités."} Il restera consultable dans les comptes clôturés.</p>
+    <p class="muted" style="margin:0;font-size:13px">${left > 0 ? isValue(a) ? `La valeur estimée, ${fmtCents(left)}, sera retirée du compte (montant modifiable ensuite dans le retrait).` : `Les ${fmtCents(left)} de liquidités seront retirés du compte.` : "Le compte n'a plus de liquidités."} Il restera consultable dans les comptes clôturés.</p>
     <div class="field"><label>Date de clôture</label><input class="input" type="date" name="date" value="${t0()}"></div>
-    ${r.v.cash > 0 ? `<label class="check"><input type="checkbox" name="link" checked><span>Reverser sur la trésorerie de</span><select class="select" name="domainId" data-fill="domains-perso"></select></label>` : ""}`, "Clôturer");
+    ${left > 0 ? `<label class="check"><input type="checkbox" name="link" checked><span>Reverser sur la trésorerie de</span><select class="select" name="domainId" data-fill="domains-perso"></select></label>` : ""}`, "Clôturer");
   if (v) await mutate("POST", `accounts/${id}/close`, { date: v.date, link: !!v.link, domainId: v.domainId || null }, "Compte clôturé");
 }
 onClick("accClose", closeAcc);
@@ -335,7 +387,7 @@ const opDialog = document.createElement("dialog");
 opDialog.className = "wide";
 opDialog.innerHTML = `<form id="opForm" novalidate>
   <div class="dialog-head"><h3 id="opTitle">Nouvelle opération</h3></div>
-  <div class="op-types"><div class="seg" id="opType"><button type="button" data-v="buy">Achat</button><button type="button" data-v="sell">Vente</button><button type="button" data-v="deposit">Versement</button><button type="button" data-v="withdrawal">Retrait</button></div>
+  <div class="op-types"><div class="seg" id="opType"><button type="button" data-v="valuation">Valeur</button><button type="button" data-v="buy">Achat</button><button type="button" data-v="sell">Vente</button><button type="button" data-v="deposit">Versement</button><button type="button" data-v="withdrawal">Retrait</button></div>
     <select class="select" id="opOther" aria-label="Autre opération"><option value="">Autre…</option><option value="dividend">Dividende</option><option value="interest">Intérêts</option><option value="fee">Frais</option><option value="tax">Impôt / prélèvement</option><option value="trade">Trade clôturé (CFD, futures…)</option><option value="split">Division d'actions</option><option value="initial">Reprise (position existante)</option></select></div>
   <div class="fields-2">
     <div class="field"><label for="opAccount">Compte</label><select class="select" id="opAccount" data-fill="accounts"></select></div>
@@ -356,7 +408,7 @@ opDialog.innerHTML = `<form id="opForm" novalidate>
     <div class="field"><label for="opGross">Montant brut (€)</label><input class="input num" id="opGross" type="number" step="0.01" min="0"></div>
     <div class="field"><label for="opWithholding">Retenues et prélèvements (€)</label><input class="input num" id="opWithholding" type="number" step="0.01" min="0"></div>
   </div>
-  <div class="field" data-show="buy sell deposit withdrawal interest fee tax trade initial"><label for="opAmount" id="opAmountLabel">Montant (€)</label>
+  <div class="field" data-show="buy sell deposit withdrawal interest fee tax trade initial valuation"><label for="opAmount" id="opAmountLabel">Montant (€)</label>
     <div class="amount-row"><input class="input num amount-input" id="opAmount" type="number" step="0.01" inputmode="decimal"><button type="button" class="link-btn" id="opReset" hidden>recalculer</button></div></div>
   <div class="sub-box" data-show="deposit withdrawal">
     <label class="check"><span class="toggle"><input type="checkbox" id="opLink" checked><span></span></span><span id="opLinkLabel">Prélevé sur la trésorerie de</span></label>
@@ -373,13 +425,21 @@ document.body.appendChild(opDialog);
 let editingOp = null, amountEdited = false, opType = "buy";
 const n = (id) => parseFloat($(id).value) || 0;
 const opErr = (m) => { $("#opError").textContent = m; $("#opError").hidden = !m; };
+const SEG_TYPES = ["valuation", "buy", "sell", "deposit", "withdrawal"];
+// Types proposés selon le suivi du compte choisi
+function applyTracking() {
+  const value = isValue(accById($("#opAccount").value));
+  for (const b of $$("#opType button")) b.hidden = value ? !VALUE_OPS.has(b.dataset.v) : b.dataset.v === "valuation";
+  $("#opOther").hidden = value;
+  if (value ? !VALUE_OPS.has(opType) : opType === "valuation") setOpType(value ? "valuation" : "buy");
+}
 function setOpType(type) {
   opType = type;
-  setSeg("opType", ["buy", "sell", "deposit", "withdrawal"].includes(type) ? type : "");
-  $("#opOther").value = ["buy", "sell", "deposit", "withdrawal"].includes(type) ? "" : type;
+  setSeg("opType", SEG_TYPES.includes(type) ? type : "");
+  $("#opOther").value = SEG_TYPES.includes(type) ? "" : type;
   for (const el of $$("[data-show]", opDialog)) el.hidden = !el.dataset.show.split(" ").includes(type);
   $("#opPriceLabel").textContent = type === "trade" ? "Prix d'entrée (€)" : type === "initial" ? "PRU (€)" : "Prix unitaire (€)";
-  $("#opAmountLabel").textContent = { buy: "Montant payé, frais inclus (€)", sell: "Montant reçu, frais déduits (€)", trade: "Résultat, frais déduits (€) · négatif si perte", initial: "Valeur au PRU ou liquidités reprises (€)" }[type] || "Montant (€)";
+  $("#opAmountLabel").textContent = { valuation: "Valeur totale affichée par ton courtier (€)", buy: "Montant payé, frais inclus (€)", sell: "Montant reçu, frais déduits (€)", trade: "Résultat, frais déduits (€) · négatif si perte", initial: "Valeur au PRU ou liquidités reprises (€)" }[type] || "Montant (€)";
   $("#opLinkLabel").textContent = type === "deposit" ? "Prélevé sur la trésorerie de" : "Reversé sur la trésorerie de";
   amountEdited = !!editingOp;
   recalc();
@@ -407,11 +467,15 @@ function recalc() {
   $("#opReset").hidden = !amountEdited || defaultAmount() == null;
   const acc = accById($("#opAccount").value);
   if (!acc) { $("#opFooter").textContent = ""; return; }
-  const draft = { ...draftOp(), id: editingOp?.id || "draft", createdAt: "~" };
+  // "9999" se range après tout horodatage, quelle que soit la collation de localeCompare (un "~" passait avant les chiffres)
+  const draft = { ...draftOp(), id: editingOp?.id || "draft", createdAt: editingOp?.createdAt || "9999" };
   const others = S.operations.filter((o) => o.accountId === acc.id && o.id !== editingOp?.id);
   const before = replay(acc, others, { strict: false });
   const after = replay(acc, [...others, draft], { strict: false });
-  const bits = [`Liquidités après : <b class="num ${after.cash < 0 ? "down" : ""}">${fmtCents(after.cash)}</b>`];
+  const v = valuate(after);
+  const bits = isValue(acc)
+    ? [`Valeur après : <b class="num">${fmtCents(v.total)}</b>`, `plus-value <b class="num ${v.gain >= 0 ? "up" : "down"}">${fmtSignedCents(v.gain)}</b>${after.contributions > 0 ? ` (${fmtPct(v.gain / after.contributions)} sur ${fmtCents(after.contributions)} versés)` : ""}`]
+    : [`Liquidités après : <b class="num ${after.cash < 0 ? "down" : ""}">${fmtCents(after.cash)}</b>`];
   if (opType === "sell" && draft.asset) {
     const p = after.positions.find((x) => x.asset === draft.asset);
     const ev = after.events.find((e) => e.opId === draft.id);
@@ -430,7 +494,7 @@ function recalc() {
 opDialog.addEventListener("input", (e) => { if (e.target.id === "opAmount") amountEdited = true; recalc(); });
 opDialog.addEventListener("change", (e) => {
   if (e.target.id === "opOther" && e.target.value) setOpType(e.target.value);
-  if (e.target.id === "opAccount") { const a = accById(e.target.value); if (a && !editingOp) $("#opDomain").value = a.domainId || ""; recalc(); }
+  if (e.target.id === "opAccount") { const a = accById(e.target.value); if (a && !editingOp) $("#opDomain").value = a.domainId || ""; applyTracking(); recalc(); }
   if (e.target.id === "opAsset" && !editingOp && !$("#opPrice").value) { const a = S.assets.find((x) => x.symbol === e.target.value.trim().toUpperCase()); if (a?.price) { $("#opPrice").value = a.price; recalc(); } }
 });
 opDialog.addEventListener("click", (e) => {
@@ -444,7 +508,8 @@ export function openOperation(op, prefill = {}) {
   if (!S.accounts.some((a) => !a.closedOn) && !op) return openAccount();
   editingOp = op || null;
   fillSelects(opDialog);
-  const src = op || { type: "buy", date: t0(), accountId: prefill.accountId || store.get("lastAccount", null) || S.accounts.find((a) => !a.closedOn)?.id, asset: "", qty: "", price: "", feesCents: 0, amountCents: "", side: "long", ratio: "", notes: "", ...prefill };
+  const accountId = prefill.accountId || store.get("lastAccount", null) || S.accounts.find((a) => !a.closedOn)?.id;
+  const src = op || { type: isValue(accById(accountId)) ? "valuation" : "buy", date: t0(), accountId, asset: "", qty: "", price: "", feesCents: 0, amountCents: "", side: "long", ratio: "", notes: "", ...prefill };
   $("#opTitle").textContent = op ? "Modifier l'opération" : "Nouvelle opération";
   if (op && accById(op.accountId)?.closedOn) $("#opAccount").insertAdjacentHTML("beforeend", `<option value="${op.accountId}">${esc(accById(op.accountId).name)}</option>`);
   $("#opAccount").value = src.accountId && accById(src.accountId) ? src.accountId : $("#opAccount").options[0]?.value;
@@ -466,6 +531,9 @@ export function openOperation(op, prefill = {}) {
   $("#opDelete").hidden = !op;
   opErr("");
   setOpType(src.type);
+  // Une opération existante garde son type, même si le compte a changé de suivi depuis
+  if (op) { for (const b of $$("#opType button")) b.hidden = b.dataset.v === "valuation" && op.type !== "valuation" && !isValue(accById(op.accountId)); $("#opOther").hidden = false; }
+  else applyTracking();
   opDialog.showModal();
 }
 export function openOperationForTransfer(t) {

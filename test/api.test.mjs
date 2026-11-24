@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-api-"));
@@ -30,7 +31,7 @@ after(() => { proc?.kill(); fs.rmSync(DIR, { recursive: true, force: true }); })
 
 test("import 1.0 : investissements migrés en comptes, trésorerie intacte", async () => {
   const s = await state();
-  assert.equal(s.info.schemaVersion, 2);
+  assert.equal(s.info.schemaVersion, 3);
   assert.ok(s.accounts.length >= 1);
   const transfers = s.transactions.filter((t) => t.kind === "transfer");
   assert.equal(transfers.length, 4);
@@ -127,6 +128,34 @@ test("trade clôturé et clôture de compte", async () => {
   assert.equal(ops.find((o) => o.type === "withdrawal").amountCents, 38000);
 });
 
+test("PEA en valeur seule : relevé, opérations refusées, passage depuis le détaillé, clôture", async () => {
+  const acc = (await api("POST", "accounts", { type: "pea", tracking: "value", name: "PEA valeur" })).data;
+  assert.equal(acc.tracking, "value");
+  assert.equal((await api("POST", "operations", { accountId: acc.id, date: shift(-10), type: "deposit", amountCents: 100000 })).status, 201);
+  assert.equal((await api("POST", "operations", { accountId: acc.id, date: shift(-1), type: "valuation", amountCents: 105000 })).status, 201);
+  assert.equal((await api("POST", "operations", { accountId: acc.id, date: today, type: "buy", asset: "CW8", qty: 1, amountCents: 1000 })).status, 400);
+
+  const cto = (await api("POST", "accounts", { type: "cto", name: "CTO suivi" })).data;
+  assert.equal(cto.tracking, "detail");
+  assert.equal((await api("POST", "operations", { accountId: cto.id, date: today, type: "valuation", amountCents: 1 })).status, 400);
+  assert.equal((await api("PUT", `accounts/${cto.id}`, { tracking: "value" })).data.tracking, "value");
+  assert.equal((await api("POST", "operations", { accountId: cto.id, date: today, type: "valuation", amountCents: 5000 })).status, 201);
+
+  assert.equal((await api("POST", `accounts/${acc.id}/close`, { date: today, link: false })).status, 200);
+  const ops = (await state()).operations.filter((o) => o.accountId === acc.id);
+  assert.equal(ops.find((o) => o.type === "withdrawal").amountCents, 105000);
+});
+
+test("migration 3 : virements reliés et triggers de synchro conservés", async () => {
+  const s = await state();
+  const ids = new Set(s.operations.map((o) => o.id));
+  assert.ok(s.transactions.filter((t) => t.invOpId).every((t) => ids.has(t.invOpId)));
+  const db = new DatabaseSync(path.join(DIR, "ledger.db"), { readOnly: true });
+  const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'inv_operations'").all().map((r) => r.name);
+  db.close();
+  assert.deepEqual(triggers.sort(), ["sync_inv_operations_del", "sync_inv_operations_ins", "sync_inv_operations_upd"]);
+});
+
 test("réglages validés", async () => {
   assert.equal((await api("PUT", "settings", { showCents: false, density: "compact" })).data.showCents, false);
   assert.equal((await api("PUT", "settings", { nope: 1 })).status, 400);
@@ -159,6 +188,6 @@ test("restauration d'une sauvegarde 1.0 conservée", async () => {
   const r = await api("POST", `backups/${kept.name}/restore`);
   assert.equal(r.status, 200);
   const after = await state();
-  assert.equal(after.info.schemaVersion, 2);
+  assert.equal(after.info.schemaVersion, 3);
   assert.ok(after.accounts.length >= 1);
 });

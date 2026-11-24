@@ -84,3 +84,43 @@ test("reprise : position et versements antérieurs", () => {
   assert.equal(s.mature, true);
   assert.equal(s.room, 15000000 - 1000000);
 });
+
+test("suivi en valeur : dernier relevé et versements postérieurs, historique détaillé ignoré, plafond inchangé", () => {
+  const acc = { type: "pea", tracking: "value", initialContributionsCents: 100000 };
+  const r = replay(acc, [
+    op("2026-01-05", "deposit", { amountCents: 50000 }),
+    op("2026-01-05", "buy", { asset: "CW8", qty: 1, amountCents: 50000 }),
+    op("2026-01-31", "valuation", { amountCents: 160000 }),
+    op("2026-02-05", "deposit", { amountCents: 20000 }),
+  ]);
+  assert.equal(r.cash, 180000);
+  assert.equal(r.valuedOn, "2026-01-31");
+  assert.equal(r.positions.length, 0);
+  const v = value(r);
+  assert.deepEqual([v.total, v.cash, v.gain, v.estimated], [180000, 0, 10000, false]);
+  assert.equal(peaStatus(acc, r, "2026-03-01").paid, 170000);
+});
+
+test("suivi en valeur : estimée au versé sans relevé ; relevé du jour pris après le versement du jour", () => {
+  const r = replay({ type: "pea", tracking: "value" }, [op("2026-01-05", "deposit", { amountCents: 10000 })]);
+  assert.deepEqual([r.cash, r.estimated], [10000, true]);
+  const same = replay({ type: "pea", tracking: "value" }, [op("2026-02-01", "valuation", { amountCents: 30000 }), op("2026-02-01", "deposit", { amountCents: 5000 })]);
+  assert.equal(same.cash, 30000);
+});
+
+test("suivi en valeur : un retrait au-delà de la valeur relevée avertit sans bloquer", () => {
+  const r = replay({ type: "pea", tracking: "value" }, [op("2026-01-01", "deposit", { amountCents: 10000 }), op("2026-01-02", "valuation", { amountCents: 9000 }), op("2026-01-03", "withdrawal", { amountCents: 9500 })]);
+  assert.equal(r.cash, -500);
+  assert.equal(r.warnings.length, 1);
+});
+
+test("suivi détaillé : les relevés de valeur sont ignorés", () => {
+  const r = replay({ type: "cto" }, [op("2026-01-01", "deposit", { amountCents: 10000 }), op("2026-01-02", "valuation", { amountCents: 99999 })]);
+  assert.equal(value(r).total, 10000);
+});
+
+test("aperçu : un brouillon daté du jour (createdAt 9999) passe après les opérations enregistrées le même jour", () => {
+  const saved = op("2026-11-24", "valuation", { amountCents: 100, createdAt: "2026-11-24 10:00:00" });
+  const draft = op("2026-11-24", "valuation", { amountCents: 200, createdAt: "9999" });
+  assert.equal(replay({ type: "pea", tracking: "value" }, [draft, saved]).cash, 200);
+});

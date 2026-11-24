@@ -2,7 +2,7 @@
 // Chaque écriture rejoue l'historique du compte dans la même transaction SQL : une modification qui rendrait
 // une position négative, ou les liquidités d'un PEA négatives, est refusée et rien n'est enregistré.
 import { all, get, run, tx, insert, update, existsIn, need, HttpError, uid, today, isDate, nowStamp } from "./db.mjs";
-import { ACCOUNT_TYPES, OP_TYPES, replay, PortfolioError } from "../public/js/lib/portfolio.js";
+import { ACCOUNT_TYPES, OP_TYPES, VALUE_OPS, replay, PortfolioError } from "../public/js/lib/portfolio.js";
 
 const str = (v, max = 500) => String(v ?? "").trim().slice(0, max);
 const int = (v) => Math.round(Number(v) || 0);
@@ -11,6 +11,7 @@ export const out = {
   accounts: (r) => ({
     id: r.id, name: r.name, type: r.type, broker: r.broker, fiscalDate: r.fiscal_date, ceilingCents: r.ceiling_cents,
     initialContributionsCents: r.initial_contributions_cents, domainId: r.domain_id, closedOn: r.closed_on, position: r.position, createdAt: r.created_at,
+    tracking: r.tracking,
   }),
   operations: (r) => ({
     id: r.id, accountId: r.account_id, date: r.date, type: r.type, asset: r.asset, qty: r.qty, price: r.price,
@@ -30,7 +31,8 @@ function accountSchema(b, prev = {}) {
   const initial = int(m.initialContributionsCents);
   need(initial >= 0, "Versements antérieurs invalides.");
   return {
-    name, type: m.type, broker: str(m.broker, 60), fiscal_date: fiscal, ceiling_cents: ceiling, initial_contributions_cents: initial,
+    name, type: m.type, tracking: m.tracking === "value" ? "value" : "detail",
+    broker: str(m.broker, 60), fiscal_date: fiscal, ceiling_cents: ceiling, initial_contributions_cents: initial,
     domain_id: existsIn("domains", m.domainId) ? m.domainId : null,
     position: Number.isFinite(m.position) ? m.position : get("SELECT COUNT(*) n FROM inv_accounts").n,
   };
@@ -44,6 +46,11 @@ function opSchema(b, prev = {}) {
   need(OP_TYPES[m.type], "Type d'opération invalide.");
   need(isDate(m.date), "Date invalide.");
   need(!account.closed_on || m.date <= account.closed_on, `Ce compte est clôturé depuis le ${account.closed_on}.`);
+  // Une opération déjà enregistrée garde son type si le compte change de suivi : l'historique reste modifiable.
+  if (m.type !== prev.type || m.accountId !== prev.accountId) {
+    if (account.tracking === "value") need(VALUE_OPS.has(m.type), "Ce compte est suivi par sa valeur : saisis seulement sa valeur, ses versements et ses retraits.");
+    else need(m.type !== "valuation", "Passe ce compte en suivi « Valeur seule » pour saisir sa valeur globale.");
+  }
   const asset = str(m.asset, 32).toUpperCase();
   if (NEEDS_ASSET.has(m.type) || (m.type === "initial" && Number(m.qty) > 0)) need(asset, "Indique l'actif (ticker ou nom court).");
   const qty = Number(m.qty) || 0;
@@ -55,8 +62,8 @@ function opSchema(b, prev = {}) {
   const ratio = m.type === "split" ? Number(m.ratio) : null;
   if (m.type === "split") need(ratio > 0, "Rapport de division invalide.");
   return {
-    account_id: account.id, date: m.date, type: m.type, asset: ["deposit", "withdrawal", "fee", "tax", "interest"].includes(m.type) ? "" : asset,
-    qty: m.type === "split" ? 0 : qty, price: Number(m.price) || 0, fees_cents: Math.max(0, int(m.feesCents)), amount_cents: amount,
+    account_id: account.id, date: m.date, type: m.type, asset: ["deposit", "withdrawal", "fee", "tax", "interest", "valuation"].includes(m.type) ? "" : asset,
+    qty: m.type === "split" || m.type === "valuation" ? 0 : qty, price: Number(m.price) || 0, fees_cents: Math.max(0, int(m.feesCents)), amount_cents: amount,
     side: m.type === "trade" ? (m.side === "short" ? "short" : "long") : null, ratio, notes: str(m.notes, 1000),
   };
 }

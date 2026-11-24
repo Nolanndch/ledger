@@ -192,4 +192,31 @@ function v2({ db, all, get, run, uid, fresh }) {
   }
 }
 
-export const MIGRATIONS = [v1, v2];
+// Schéma 3 : Ledger 1.3 — suivi d'un compte d'investissement par sa seule valeur (relevés « valuation »).
+// `inv_operations` est reconstruite pour élargir son CHECK ; clés étrangères désactivées (voir db.mjs),
+// les virements reliés (transactions.inv_op_id) gardent leur lien. Les triggers de synchro sont recréés par sync.ensure().
+function v3({ db }) {
+  db.exec(`
+    ALTER TABLE inv_accounts ADD COLUMN tracking TEXT NOT NULL DEFAULT 'detail' CHECK (tracking IN ('detail','value'));
+
+    CREATE TABLE inv_operations_v3 (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES inv_accounts(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('initial','deposit','withdrawal','buy','sell','dividend','interest','fee','tax','trade','split','valuation')),
+      asset TEXT NOT NULL DEFAULT '', qty REAL NOT NULL DEFAULT 0, price REAL NOT NULL DEFAULT 0,
+      fees_cents INTEGER NOT NULL DEFAULT 0,
+      amount_cents INTEGER NOT NULL,
+      side TEXT, ratio REAL, notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      CHECK (amount_cents >= 0 OR type = 'trade')
+    );
+    INSERT INTO inv_operations_v3 (id, account_id, date, type, asset, qty, price, fees_cents, amount_cents, side, ratio, notes, created_at)
+      SELECT id, account_id, date, type, asset, qty, price, fees_cents, amount_cents, side, ratio, notes, created_at FROM inv_operations;
+    DROP TABLE inv_operations;
+    ALTER TABLE inv_operations_v3 RENAME TO inv_operations;
+    CREATE INDEX inv_ops_account ON inv_operations(account_id, asset, date);
+  `);
+}
+
+export const MIGRATIONS = [v1, v2, v3];
